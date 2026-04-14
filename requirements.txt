@@ -12,3 +12,4 @@ charset-normalizer==3.4.7
 pyee==13.0.1
 gunicorn
 psycopg2-binary
+playwright
