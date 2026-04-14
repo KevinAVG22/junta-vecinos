@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Usuarios - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="mb-8 flex items-start justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Usuarios</h1>
+            <p class="text-gray-600 dark:text-slate-300 mt-2">Administra perfiles y permisos.</p>
+        </div>
+        <a href="{{ url_for('dashboard') }}"
+           class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+            Volver
+        </a>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg p-6 mb-6 border border-transparent dark:border-slate-800">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-slate-100 mb-4">Crear cuenta</h2>
+        <form method="POST" action="{{ url_for('crear_usuario') }}" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2" for="username">Usuario *</label>
+                <input id="username" name="username" required
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100"
+                       placeholder="Ej: maria">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2" for="email">Email *</label>
+                <input id="email" name="email" type="email" required
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100"
+                       placeholder="maria@mail.com">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2" for="password">Contraseña *</label>
+                <input id="password" name="password" type="password" required
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100"
+                       placeholder="mínimo 6 caracteres">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2" for="role_new">Rol *</label>
+                <select id="role_new" name="role"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                    {% for r in roles %}
+                        <option value="{{ r }}">{{ r }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="md:col-span-4">
+                <button type="submit"
+                        class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                    Crear usuario
+                </button>
+            </div>
+        </form>
+        <p class="text-xs text-gray-500 dark:text-slate-400 mt-2">Tip: el rol Admin es el único que puede ver el historial.</p>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-800">
+                <thead class="bg-gray-50 dark:bg-slate-950">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">ID</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">Usuario</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">Email</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">Rol</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">Reset contraseña</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-slate-800">
+                    {% for u in usuarios %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-slate-800">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                            <span class="font-mono text-xs bg-gray-100 dark:bg-slate-950 dark:text-slate-100 px-2 py-1 rounded">#{{ u.id }}</span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                            <div class="font-medium">{{ u.username }}</div>
+                            {% if u.es_admin or u.role == 'Admin' %}
+                                <div class="text-xs text-indigo-700 dark:text-indigo-300">Admin</div>
+                            {% endif %}
+                            {% if current_user.id == u.id %}
+                                <div class="text-xs text-gray-500 dark:text-slate-400">(tú)</div>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-slate-200">{{ u.email }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <form method="POST" action="{{ url_for('actualizar_rol_usuario', id=u.id) }}" class="flex items-center gap-2">
+                                <select name="role"
+                                        class="px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary text-sm dark:bg-slate-950 dark:text-slate-100">
+                                    {% for r in roles %}
+                                        <option value="{{ r }}" {% if (u.role or 'Asistente') == r %}selected{% endif %}>{{ r }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit"
+                                        class="bg-primary hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg transition duration-300 text-sm">
+                                    Guardar
+                                </button>
+                            </form>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <form method="POST" action="{{ url_for('reset_password_usuario', id=u.id) }}" class="flex items-center gap-2">
+                                <input type="password" name="password_nueva" minlength="6" required
+                                       class="w-44 px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary text-sm dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-400"
+                                       placeholder="Nueva contraseña">
+                                <button type="submit"
+                                        onclick="return confirm('¿Resetear contraseña de este usuario?')"
+                                        class="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-3 rounded-lg transition duration-300 text-sm">
+                                    Resetear
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-6 bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-800 rounded-lg p-4 text-sm text-amber-900 dark:text-slate-200">
+        Solo el rol <span class="font-semibold">Admin</span> puede ver el <span class="font-semibold">Historial</span>.
+    </div>
+</div>
+{% endblock %}
+

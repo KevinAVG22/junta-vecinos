@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <div class="flex justify-between items-center">
+        <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Dashboard de Vecinos</h1>
+        <div class="flex space-x-2">
+            {% if current_user.es_admin or current_user.role == 'Admin' %}
+                <a href="{{ url_for('registros') }}"
+                   class="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 flex items-center">
+                    Historial
+                </a>
+            {% endif %}
+            <a href="{{ url_for('exportar_excel') }}" 
+               class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 flex items-center" download>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Exportar a Excel
+            </a>
+            <a href="{{ url_for('nuevo_vecino') }}" 
+               class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                + Agregar Vecino
+            </a>
+        </div>
+    </div>
+    <p class="text-gray-600 dark:text-slate-300 mt-2">Gestiona la información de todos los vecinos del cuadrante</p>
+</div>
+
+<!-- Estadísticas -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-blue-50 dark:bg-slate-900 border border-blue-200 dark:border-slate-800 rounded-lg p-4">
+        <div class="flex items-center">
+            <div class="flex-shrink-0">
+                <svg class="h-8 w-8 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm font-medium text-blue-900 dark:text-slate-200">Total de Vecinos</p>
+                <p class="text-2xl font-bold text-blue-600">{{ total_vecinos }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-green-50 dark:bg-slate-900 border border-green-200 dark:border-slate-800 rounded-lg p-4">
+        <div class="flex items-center">
+            <div class="flex-shrink-0">
+                <svg class="h-8 w-8 text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm font-medium text-green-900 dark:text-slate-200">Mostrando</p>
+                <p class="text-2xl font-bold text-green-600">{{ vecinos_filtrados }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-purple-50 dark:bg-slate-900 border border-purple-200 dark:border-slate-800 rounded-lg p-4">
+        <div class="flex items-center">
+            <div class="flex-shrink-0">
+                <svg class="h-8 w-8 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm font-medium text-purple-900 dark:text-slate-200">Página</p>
+                <p class="text-2xl font-bold text-purple-600">{{ pagination.page }}/{{ pagination.pages }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Buscador y Filtros -->
+<div class="bg-white dark:bg-slate-900 shadow-md rounded-lg p-6 mb-6 border border-transparent dark:border-slate-800">
+    <form method="GET" action="{{ url_for('dashboard') }}" class="space-y-4" id="searchForm">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Buscador -->
+            <div>
+                <label for="search" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">
+                    🔍 Buscar
+                </label>
+                <input type="text" id="search" name="search" 
+                       value="{{ search }}"
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                       placeholder="Buscar por nombre, apellidos, RUT o domicilio">
+            </div>
+            
+            <!-- Ordenar por -->
+            <div>
+                <label for="sort_by" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">
+                    📊 Ordenar por
+                </label>
+                <select id="sort_by" name="sort_by" 
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                    <option value="nombre" {% if sort_by == 'nombre' %}selected{% endif %}>Nombre</option>
+                    <option value="apellidos" {% if sort_by == 'apellidos' %}selected{% endif %}>Apellidos</option>
+                    <option value="rut" {% if sort_by == 'rut' %}selected{% endif %}>RUT</option>
+                    <option value="domicilio" {% if sort_by == 'domicilio' %}selected{% endif %}>Domicilio</option>
+                    <option value="fecha_registro" {% if sort_by == 'fecha_registro' %}selected{% endif %}>Fecha de Registro</option>
+                </select>
+            </div>
+            
+            <!-- Orden -->
+            <div>
+                <label for="sort_order" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">
+                    🔄 Orden
+                </label>
+                <select id="sort_order" name="sort_order" 
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                    <option value="asc" {% if sort_order == 'asc' %}selected{% endif %}>Ascendente (A-Z)</option>
+                    <option value="desc" {% if sort_order == 'desc' %}selected{% endif %}>Descendente (Z-A)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="flex justify-between items-center">
+            <button type="submit" 
+                    class="bg-primary hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                🔍 Aplicar Filtros
+            </button>
+            
+            {% if search or sort_by != 'nombre' or sort_order != 'asc' %}
+                <a href="{{ url_for('dashboard') }}" 
+                   class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+                    🗑️ Limpiar Filtros
+                </a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+{% if vecinos %}
+    <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-800">
+                <thead class="bg-gray-50 dark:bg-slate-950">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            #
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            Nombre
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            Apellidos
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            RUT
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            Domicilio
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            Teléfono
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            Fecha Registro
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                            Acciones
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-slate-800">
+                    {% for vecino in vecinos %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-slate-800">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-medium text-gray-900 dark:text-slate-100">
+                                {{ (pagination.page - 1) * pagination.per_page + loop.index }}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-medium text-gray-900 dark:text-slate-100">
+                                {{ vecino.nombre }}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900 dark:text-slate-100">{{ vecino.apellidos }}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900 dark:text-slate-100">{{ vecino.rut }}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900 dark:text-slate-100">{{ vecino.domicilio }}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900 dark:text-slate-100">
+                                {% if vecino.telefono %}
+                                    {{ vecino.telefono }}
+                                {% else %}
+                                    <span class="text-gray-400">No especificado</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900 dark:text-slate-100">
+                                {{ vecino.fecha_registro.strftime('%d/%m/%Y') }}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <div class="flex space-x-2">
+                                <a href="{{ url_for('ver_vecino', id=vecino.id) }}"
+                                   class="text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded text-xs">
+                                    Ver
+                                </a>
+                                <a href="{{ url_for('editar_vecino', id=vecino.id) }}" 
+                                   class="text-blue-600 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-xs">
+                                    Editar
+                                </a>
+                                <a href="{{ url_for('eliminar_vecino', id=vecino.id) }}" 
+                                   class="text-red-600 hover:text-red-900 bg-red-100 hover:bg-red-200 px-2 py-1 rounded text-xs"
+                                   onclick="return confirm('¿Estás seguro de que quieres eliminar este vecino?')">
+                                    Eliminar
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Paginación -->
+    {% if pagination.pages > 1 %}
+    <div class="mt-6 bg-white dark:bg-slate-900 shadow-md rounded-lg p-4 border border-gray-100 dark:border-slate-800">
+        <div class="flex items-center justify-between">
+            <div class="text-sm text-gray-700 dark:text-slate-200">
+                Mostrando {{ pagination.items|length }} de {{ vecinos_filtrados }} vecinos
+                {% if search %}
+                    (filtrados de {{ total_vecinos }} total)
+                {% endif %}
+            </div>
+            
+            <div class="flex space-x-2">
+                {% if pagination.has_prev %}
+                    <a href="{{ url_for('dashboard', page=pagination.prev_num, search=search, sort_by=sort_by, sort_order=sort_order) }}" 
+                       class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                        ← Anterior
+                    </a>
+                {% endif %}
+                
+                {% for page_num in pagination.iter_pages() %}
+                    {% if page_num %}
+                        {% if page_num != pagination.page %}
+                            <a href="{{ url_for('dashboard', page=page_num, search=search, sort_by=sort_by, sort_order=sort_order) }}" 
+                               class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                                {{ page_num }}
+                            </a>
+                        {% else %}
+                            <span class="px-3 py-2 text-sm font-medium text-white bg-primary border border-primary rounded-md">
+                                {{ page_num }}
+                            </span>
+                        {% endif %}
+                    {% else %}
+                        <span class="px-3 py-2 text-sm font-medium text-gray-300 dark:text-slate-500">...</span>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if pagination.has_next %}
+                    <a href="{{ url_for('dashboard', page=pagination.next_num, search=search, sort_by=sort_by, sort_order=sort_order) }}" 
+                       class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                        Siguiente →
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+{% else %}
+    <div class="text-center py-12">
+        <div class="text-6xl mb-4">🏘️</div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">
+            {% if search %}
+                No se encontraron vecinos con "{{ search }}"
+            {% else %}
+                No hay vecinos registrados
+            {% endif %}
+        </h3>
+        <p class="text-gray-600 mb-6">
+            {% if search %}
+                Intenta con otros términos de búsqueda o 
+                <a href="{{ url_for('dashboard') }}" class="text-primary hover:text-emerald-700">limpiar los filtros</a>
+            {% else %}
+                Comienza agregando el primer vecino al sistema
+            {% endif %}
+        </p>
+        {% if not search %}
+            <a href="{{ url_for('nuevo_vecino') }}" 
+               class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">
+                Agregar Primer Vecino
+            </a>
+        {% endif %}
+    </div>
+{% endif %}
+
+<script>
+// Búsqueda automática después de escribir
+let searchTimeout = null;
+document.getElementById('search').addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        document.getElementById('searchForm').submit();
+    }, 1000); // Esperar 1 segundo después de que el usuario deje de escribir
+});
+
+// Auto-submit cuando cambian los filtros
+document.getElementById('sort_by').addEventListener('change', function() {
+    document.getElementById('searchForm').submit();
+});
+
+document.getElementById('sort_order').addEventListener('change', function() {
+    document.getElementById('searchForm').submit();
+});
+
+// Resaltar términos de búsqueda en la tabla
+function highlightSearchTerms() {
+    const searchTerm = '{{ search }}';
+    if (!searchTerm) return;
+    
+    const table = document.querySelector('tbody');
+    const rows = table.querySelectorAll('tr');
+    const isDark = document.documentElement.classList.contains('dark');
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        cells.forEach(cell => {
+            const text = cell.textContent;
+            if (text.toLowerCase().includes(searchTerm.toLowerCase())) {
+                // En modo oscuro, usar un resaltado que mantenga buen contraste
+                if (isDark) {
+                    cell.style.backgroundColor = 'rgba(16, 185, 129, 0.22)'; // emerald-500 con alpha
+                    cell.style.color = 'rgb(241, 245, 249)'; // slate-100
+                } else {
+                    cell.style.backgroundColor = '#fef3c7'; // Amarillo claro
+                    cell.style.color = ''; // reset
+                }
+            }
+        });
+    });
+}
+
+// Ejecutar cuando se carga la página
+document.addEventListener('DOMContentLoaded', function() {
+    highlightSearchTerms();
+});
+</script>
+{% endblock %} 

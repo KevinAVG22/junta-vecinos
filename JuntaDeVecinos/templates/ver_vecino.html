@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Ficha Vecino - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="mb-8 flex items-start justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Ficha del Vecino</h1>
+            <p class="text-gray-600 dark:text-slate-300 mt-2">{{ vecino.nombre }} {{ vecino.apellidos }}</p>
+        </div>
+        <div class="flex gap-2">
+            <a href="{{ url_for('editar_vecino', id=vecino.id) }}"
+               class="bg-primary hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                Editar
+            </a>
+            <a href="{{ url_for('dashboard') }}"
+               class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg p-6 border border-gray-100 dark:border-slate-800">
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <div>
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">RUT</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">{{ vecino.rut }}</dd>
+            </div>
+            <div>
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Teléfono</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">
+                    {% if vecino.telefono %}
+                        {{ vecino.telefono }}
+                    {% else %}
+                        <span class="text-gray-400 dark:text-slate-500">No especificado</span>
+                    {% endif %}
+                </dd>
+            </div>
+            <div class="md:col-span-2">
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Domicilio</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">{{ vecino.domicilio }}</dd>
+            </div>
+            <div>
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Fecha de registro</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">{{ vecino.fecha_registro.strftime('%d/%m/%Y') }}</dd>
+            </div>
+            <div class="md:col-span-2">
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Notas</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100 whitespace-pre-wrap">
+                    {% if vecino.notas %}
+                        {{ vecino.notas }}
+                    {% else %}
+                        <span class="text-gray-400 dark:text-slate-500">Sin notas</span>
+                    {% endif %}
+                </dd>
+            </div>
+        </dl>
+    </div>
+</div>
+{% endblock %}
+

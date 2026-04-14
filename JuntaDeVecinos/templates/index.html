@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Inicio - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="text-center">
+    <div class="mb-8">
+        <div class="flex justify-center mb-6">
+            <img src="{{ url_for('static', filename='junta de vecinos.jpg') }}" 
+                 alt="Junta de Vecinos" 
+                 class="w-64 h-64 object-cover rounded-lg shadow-lg ring-1 ring-black/10 dark:ring-white/10">
+        </div>
+        <h1 class="text-4xl font-bold text-gray-900 dark:text-slate-100 mb-4">
+            🏘️ Sistema de Gestión de Vecinos
+        </h1>
+        <p class="text-xl text-gray-600 dark:text-slate-300 max-w-3xl mx-auto">
+            Plataforma para la administración y gestión de información de los vecinos de nuestro cuadrante.
+            Mantén un registro organizado de todos los residentes de la comunidad.
+        </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8 mt-12">
+        <div class="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 rounded-lg shadow-md">
+            <div class="text-4xl mb-4">👥</div>
+            <h3 class="text-xl font-semibold text-gray-900 dark:text-slate-100 mb-2">Gestión de Vecinos</h3>
+            <p class="text-gray-600 dark:text-slate-300">
+                Registra y mantén actualizada la información de todos los vecinos del cuadrante.
+            </p>
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 rounded-lg shadow-md">
+            <div class="text-4xl mb-4">🔐</div>
+            <h3 class="text-xl font-semibold text-gray-900 dark:text-slate-100 mb-2">Acceso Seguro</h3>
+            <p class="text-gray-600 dark:text-slate-300">
+                Sistema de autenticación para proteger la información privada de los vecinos.
+            </p>
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 rounded-lg shadow-md">
+            <div class="text-4xl mb-4">📊</div>
+            <h3 class="text-xl font-semibold text-gray-900 dark:text-slate-100 mb-2">Reportes</h3>
+            <p class="text-gray-600 dark:text-slate-300">
+                Visualiza y genera reportes de la información de los vecinos registrados.
+            </p>
+        </div>
+    </div>
+
+    <div class="mt-12">
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('dashboard') }}" 
+               class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition duration-300">
+                Ir al Dashboard
+            </a>
+        {% else %}
+            <a href="{{ url_for('login') }}" 
+               class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition duration-300">
+                Iniciar Sesión
+            </a>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %} 

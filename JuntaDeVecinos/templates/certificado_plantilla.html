@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificado de Residencia</title>
+    <style>
+        :root {
+            --ink: #111827;
+            --muted: #374151;
+            --border: #111827;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            color: var(--ink);
+            background: #ffffff;
+        }
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            padding: 18mm 16mm;
+        }
+        .frame {
+            border: 2px solid var(--border);
+            padding: 12mm 10mm;
+            position: relative;
+        }
+        .header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12mm;
+            margin-bottom: 10mm;
+        }
+        .title {
+            text-align: center;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            margin: 0 0 2mm 0;
+            text-transform: uppercase;
+            font-size: 16px;
+        }
+        .subtitle {
+            text-align: left;
+            margin: 0;
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.35;
+        }
+        .logo {
+            width: 34mm;
+            height: 34mm;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 1px solid rgba(0,0,0,0.15);
+            flex: 0 0 auto;
+        }
+        .content {
+            font-size: 12.5px;
+            line-height: 1.45;
+        }
+        .lead {
+            margin: 0 0 6mm 0;
+        }
+        .line {
+            display: inline-block;
+            border-bottom: 1px dotted #111827;
+            min-width: 55mm;
+            padding: 0 2mm 1mm;
+            transform: translateY(-1px);
+        }
+        .line.tight {
+            padding: 0 1mm 1mm;
+        }
+        .block {
+            margin: 0 0 6mm 0;
+        }
+        .row {
+            margin: 0 0 4mm 0;
+        }
+        .two {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8mm;
+        }
+        .muted { color: var(--muted); }
+        .signature {
+            margin-top: 18mm;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10mm;
+            align-items: end;
+        }
+        .sig-box {
+            text-align: center;
+            padding-top: 14mm;
+            border-top: 1px solid #111827;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+        .footer {
+            margin-top: 10mm;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 10mm;
+        }
+        .value {
+            font-weight: 800;
+            letter-spacing: 0.02em;
+        }
+        .actions {
+            margin: 12px auto 0;
+            width: 210mm;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 0 16mm;
+        }
+        .btn {
+            border: 1px solid #0f172a;
+            background: #0f172a;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn.secondary {
+            background: white;
+            color: #0f172a;
+        }
+        @media print {
+            .actions { display: none !important; }
+            body { background: white; }
+            .page { padding: 0; }
+            .frame { border-width: 2px; }
+        }
+    </style>
+</head>
+<body>
+    {% if not embed %}
+        <div class="actions">
+            <button class="btn secondary" type="button" onclick="history.back()">Volver</button>
+            <button class="btn" type="button" onclick="window.print()">Imprimir / Guardar PDF</button>
+        </div>
+    {% endif %}
+    <div class="page">
+        <div class="frame">
+            <div class="header">
+                <div style="flex: 1 1 auto; min-width: 0;">
+                    <div class="title">CERTIFICADO DE RESIDENCIA</div>
+                    <p class="subtitle">
+                        <strong>JUAN PABLO RODRIGUEZ GUERRERO</strong>, Presidente de la Junta de Vecinos Colón Oriente
+                        Unidad Vecinal C-22, Las Condes.
+                    </p>
+                </div>
+                <img class="logo" src="{{ logo_src or url_for('static', filename='junta de vecinos.jpg') }}" alt="Logo Junta de Vecinos">
+            </div>
+
+            <div class="content">
+                <p class="lead"><span class="muted">Certifica que:</span> <span class="line">{{ cert.nombres }} {{ cert.apellidos }}</span></p>
+
+                <div class="row">
+                    <span class="muted">Cédula de Identidad:</span>
+                    <span class="line">{{ cert.rut }}</span>
+                </div>
+
+                <div class="block">
+                    <div class="muted">Tiene su actual residencia en:</div>
+                    <div class="row"><span class="line" style="min-width: 100%;">{{ cert.direccion }}</span></div>
+                </div>
+
+                <div class="block">
+                    <div class="muted">Sector de Jurisdicción de esta Unidad Vecinal.</div>
+                    <div class="row"><span class="line" style="min-width: 100%;">Junta de Vecinos Colón Oriente C-22</span></div>
+                </div>
+
+                <div class="block">
+                    <div class="muted">Otorgado a solicitud del interesado y es válido para ser presentado en:</div>
+                    <div class="row">
+                        <span class="line" style="min-width: 100%;">{{ cert.presentado_en or '&nbsp;'|safe }}</span>
+                    </div>
+                </div>
+
+                <div class="block muted">Este certificado tiene una duración de 3 meses.</div>
+
+                <div class="signature">
+                    <div></div>
+                    <div class="sig-box">FIRMA</div>
+                </div>
+
+                <div class="footer">
+                    <div class="muted">
+                        {% set meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'] %}
+                        Santiago, <span class="line tight" style="min-width: 14mm;">{{ cert.fecha.day }}</span> de
+                        <span class="line tight" style="min-width: 26mm;">{{ meses[cert.fecha.month - 1] }}</span> de
+                        <span class="line tight" style="min-width: 16mm;">{{ cert.fecha.year }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

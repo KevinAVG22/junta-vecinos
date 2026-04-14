@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Junta de Vecinos{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#059669',
+                        secondary: '#0f172a'
+                    }
+                }
+            }
+        }
+    </script>
+    <script>
+        (function() {
+            const key = 'theme';
+            const saved = localStorage.getItem(key);
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const useDark = saved ? saved === 'dark' : prefersDark;
+            document.documentElement.classList.toggle('dark', useDark);
+        })();
+    </script>
+    <script>
+        (function() {
+            const saved = localStorage.getItem('sidebar');
+            document.documentElement.classList.toggle('sidebar-collapsed', saved === 'collapsed');
+        })();
+    </script>
+    <style>
+        /* Evita "saltos" al navegar aplicando el estado antes de render */
+        html.sidebar-collapsed #sidebar { width: 5rem; } /* suficiente para el logo sin aplastarlo */
+        html.sidebar-collapsed #sidebar .sidebar-label { display: none !important; }
+        html.sidebar-collapsed #sidebar nav a { justify-content: center; }
+        html.sidebar-collapsed #sidebar .sidebar-header { padding-left: 0.75rem; padding-right: 0.75rem; justify-content: center; }
+
+        /* Inputs de fecha: popup legible en modo oscuro (forzar calendario claro) */
+        html.dark input[type="date"] { color-scheme: light; }
+        html.dark input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+            opacity: 0.95;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-slate-950 min-h-screen text-gray-900 dark:text-slate-100">
+    {% if current_user.is_authenticated %}
+    <div class="min-h-screen flex">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="w-64 bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-800 flex flex-col transition-[width] duration-200 overflow-hidden">
+            <div class="sidebar-header h-20 px-4 flex items-center border-b border-gray-200 dark:border-slate-800">
+                <a href="{{ url_for('dashboard') }}" class="flex items-center gap-3 min-w-0">
+                    <img
+                        src="{{ url_for('static', filename='junta de vecinos.jpg') }}"
+                        alt="Logo Junta de Vecinos"
+                        class="h-10 w-10 rounded-md object-cover flex-shrink-0"
+                    >
+                    <span class="sidebar-label text-sm font-bold text-gray-900 dark:text-slate-100 leading-tight whitespace-normal break-words">
+                        Junta De Vecino Colon Oriente
+                    </span>
+                </a>
+            </div>
+
+            <div class="px-4 py-4 text-sm text-gray-600 dark:text-slate-300 border-b border-gray-200 dark:border-slate-800">
+                <div class="font-medium text-gray-900 dark:text-slate-100 sidebar-label whitespace-nowrap overflow-hidden">Hola, {{ current_user.username }}</div>
+            </div>
+
+            <nav class="p-3 space-y-1 flex-1">
+                <a href="{{ url_for('dashboard') }}" title="Dashboard (Vecinos)"
+                   class="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                    </svg>
+                    <span class="sidebar-label whitespace-nowrap">Dashboard (Vecinos)</span>
+                </a>
+                <a href="{{ url_for('certificados') }}" title="Certificados"
+                   class="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5l5 5v11a2 2 0 01-2 2z" />
+                    </svg>
+                    <span class="sidebar-label whitespace-nowrap">Certificados De Residencia</span>
+                </a>
+                <a href="{{ url_for('documentos') }}" title="Documentos"
+                   class="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10M7 11h10M7 15h7M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" />
+                    </svg>
+                    <span class="sidebar-label whitespace-nowrap">Documentos</span>
+                </a>
+                <a href="{{ url_for('mi_cuenta') }}" title="Mi cuenta"
+                   class="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <span class="sidebar-label whitespace-nowrap">Mi cuenta</span>
+                </a>
+                {% if current_user.es_admin or current_user.role == 'Admin' %}
+                    <a href="{{ url_for('registros') }}" title="Historial"
+                       class="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-slate-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span class="sidebar-label whitespace-nowrap">Historial</span>
+                    </a>
+                    <a href="{{ url_for('usuarios') }}" title="Usuarios"
+                       class="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-slate-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span class="sidebar-label whitespace-nowrap">Usuarios</span>
+                    </a>
+                {% endif %}
+            </nav>
+
+            <div class="p-3 border-t border-gray-200 dark:border-slate-800 space-y-2">
+                <a href="{{ url_for('logout') }}" title="Cerrar sesión"
+                   class="flex items-center justify-center gap-2 w-full bg-primary hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2h4a2 2 0 012 2v1" />
+                    </svg>
+                    <span class="sidebar-label whitespace-nowrap">Cerrar Sesión</span>
+                </a>
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <header class="h-16 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between px-6">
+                <div class="flex items-center gap-3">
+                    <button type="button" id="sidebarToggle"
+                            class="inline-flex items-center justify-center w-10 h-10 rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 transition"
+                            aria-label="Mostrar/ocultar menú">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </button>
+                    <a href="{{ url_for('index') }}" class="text-sm text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200">Inicio</a>
+                </div>
+                <button type="button" id="themeToggleTop"
+                        class="text-sm px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 transition">
+                    Claro / Oscuro
+                </button>
+            </header>
+    {% else %}
+    <div class="min-h-screen flex flex-col">
+        <!-- Navbar (solo para no autenticados) -->
+        <nav class="bg-slate-900 text-white shadow-lg">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <a href="{{ url_for('index') }}" class="flex items-center gap-3 min-w-0">
+                            <img
+                                src="{{ url_for('static', filename='junta de vecinos.jpg') }}"
+                                alt="Logo Junta de Vecinos"
+                                class="h-9 w-9 rounded-md object-cover flex-shrink-0"
+                            >
+                            <span class="text-base font-bold whitespace-nowrap overflow-hidden text-ellipsis">
+                                Junta De Vecinos Colon Oriente
+                            </span>
+                        </a>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="{{ url_for('login') }}" class="hover:text-gray-300">Iniciar Sesión</a>
+                        <button type="button" id="themeToggleGuest"
+                                class="bg-white/10 hover:bg-white/20 text-white text-sm font-semibold py-2 px-3 rounded-md transition">
+                            Claro / Oscuro
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+    {% endif %}
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="{% if current_user.is_authenticated %}px-6{% else %}max-w-7xl mx-auto px-4 sm:px-6 lg:px-8{% endif %} mt-4">
+                {% for category, message in messages %}
+                    <div class="mb-4 p-4 rounded-lg {% if category == 'error' %}bg-red-100 border border-red-400 text-red-700{% elif category == 'success' %}bg-green-100 border border-green-400 text-green-700{% else %}bg-blue-100 border border-blue-400 text-blue-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Main Content (único block content) -->
+    <main class="{% if current_user.is_authenticated %}flex-1 px-6 py-8{% else %}flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8{% endif %}">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white {% if not current_user.is_authenticated %}mt-auto{% endif %}">
+        <div class="{% if current_user.is_authenticated %}px-6{% else %}max-w-7xl mx-auto px-4 sm:px-6 lg:px-8{% endif %} py-6">
+            <div class="text-center">
+                <p>&copy; 2024 Junta de Vecinos. Todos los derechos reservados.</p>
+            </div>
+        </div>
+    </footer>
+
+    {% if current_user.is_authenticated %}
+        </div> <!-- end main column -->
+    </div> <!-- end layout -->
+    {% else %}
+    </div> <!-- end non-auth wrapper -->
+    {% endif %}
+    <script>
+        (function() {
+            const key = 'theme';
+            function setTheme(mode) {
+                document.documentElement.classList.toggle('dark', mode === 'dark');
+                localStorage.setItem(key, mode);
+            }
+            function toggle() {
+                const isDark = document.documentElement.classList.contains('dark');
+                setTheme(isDark ? 'light' : 'dark');
+            }
+            ['themeToggleTop', 'themeToggleGuest'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('click', toggle);
+            });
+        })();
+    </script>
+    <script>
+        (function() {
+            const key = 'sidebar';
+            const sidebar = document.getElementById('sidebar');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            if (!sidebar || !toggleBtn) return;
+
+            toggleBtn.addEventListener('click', function() {
+                const html = document.documentElement;
+                const nextCollapsed = !html.classList.contains('sidebar-collapsed');
+                html.classList.toggle('sidebar-collapsed', nextCollapsed);
+                localStorage.setItem(key, nextCollapsed ? 'collapsed' : 'expanded');
+            });
+        })();
+    </script>
+</body>
+</html> 

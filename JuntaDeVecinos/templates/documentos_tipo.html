@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tipo }} - Documentos{% endblock %}
+
+{% block content %}
+<div class="mb-8 flex items-start justify-between gap-4">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Documentos: {{ tipo }}</h1>
+        <p class="text-gray-600 dark:text-slate-300 mt-2">Listado de documentos de este tipo.</p>
+    </div>
+    <div class="flex gap-2">
+        {% if tipo.lower() == DOC_TIPO_CERT_RESIDENCIA.lower() %}
+        <a href="{{ url_for('nuevo_certificado', next=request.full_path) }}"
+           class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+            + Nuevo certificado
+        </a>
+        {% else %}
+        <a href="{{ url_for('nuevo_documento', tipo=tipo) }}"
+           class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+            + Subir Documento
+        </a>
+        {% endif %}
+        <a href="{{ url_for('documentos') }}"
+           class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+            Volver
+        </a>
+    </div>
+</div>
+
+<div class="bg-white dark:bg-slate-900 shadow-md rounded-lg p-4 mb-6 border border-gray-100 dark:border-slate-800">
+    <form method="GET" action="{{ url_for('documentos_por_tipo', tipo=tipo) }}" class="space-y-4" id="searchForm">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label for="search" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">🔍 Buscar</label>
+                <input type="text" id="search" name="search" value="{{ search or '' }}"
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100"
+                       placeholder="Buscar por nombre o archivo">
+            </div>
+            <div>
+                <label for="sort_by" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">📊 Ordenar por</label>
+                <select id="sort_by" name="sort_by"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                    <option value="fecha_creacion" {% if sort_by == 'fecha_creacion' %}selected{% endif %}>Fecha</option>
+                    <option value="nombre" {% if sort_by == 'nombre' %}selected{% endif %}>Nombre</option>
+                    <option value="archivo" {% if sort_by == 'archivo' %}selected{% endif %}>Archivo</option>
+                </select>
+            </div>
+            <div>
+                <label for="sort_order" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">🔄 Orden</label>
+                <select id="sort_order" name="sort_order"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                    <option value="asc" {% if sort_order == 'asc' %}selected{% endif %}>Ascendente</option>
+                    <option value="desc" {% if sort_order == 'desc' %}selected{% endif %}>Descendente</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex justify-between items-center">
+            <button type="submit"
+                    class="bg-primary hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                🔍 Aplicar
+            </button>
+            {% if search or sort_by != 'fecha_creacion' or sort_order != 'desc' %}
+                <a href="{{ url_for('documentos_por_tipo', tipo=tipo) }}"
+                   class="bg-gray-300 hover:bg-gray-400 text-gray-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-100 font-bold py-2 px-4 rounded-lg transition duration-300">
+                    Limpiar
+                </a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+{% if documentos %}
+<div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-800">
+            <thead class="bg-gray-50 dark:bg-slate-950">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">#</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">Nombre</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">Tipo</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">Archivo</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">Fecha</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">Acciones</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-slate-800">
+                {% for d in documentos %}
+                <tr class="hover:bg-gray-50 dark:hover:bg-slate-800">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                        {{ (pagination.page - 1) * pagination.per_page + loop.index }}
+                    </td>
+                    <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-slate-100 max-w-[18rem] truncate" title="{{ d.nombre }}">
+                        {{ d.nombre }}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-slate-200">
+                        {{ d.tipo }}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-700 dark:text-slate-200 max-w-[18rem] truncate" title="{{ d.archivo_nombre }}">
+                        {{ d.archivo_nombre }}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-slate-200">
+                        {{ d.fecha_creacion.strftime('%d/%m/%Y') }}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div class="flex flex-wrap gap-2">
+                            {% if documento_permite_vista_previa(d.archivo_nombre) %}
+                            <a href="{{ url_for('ver_documento', id=d.id) }}" target="_blank"
+                               class="text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-3 py-2 rounded text-xs font-semibold">
+                                Vista previa
+                            </a>
+                            {% endif %}
+                            <a href="{{ url_for('descargar_archivo_documento', id=d.id) }}"
+                               class="text-primary hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded text-xs font-semibold">
+                                Descargar
+                            </a>
+                            <a href="{{ url_for('eliminar_documento', id=d.id, next=request.full_path) }}"
+                               onclick="return confirm('¿Eliminar definitivamente este documento?')"
+                               class="text-red-700 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-2 rounded text-xs font-semibold">
+                                Eliminar
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<div class="mt-6 bg-white dark:bg-slate-900 shadow-md rounded-lg p-4 border border-gray-100 dark:border-slate-800">
+    <div class="flex items-center justify-between">
+        <div class="text-sm text-gray-700 dark:text-slate-200">
+            Página {{ pagination.page }} de {{ pagination.pages }}
+        </div>
+        <div class="flex space-x-2">
+            {% if pagination.has_prev %}
+                <a href="{{ url_for('documentos_por_tipo', tipo=tipo, page=pagination.prev_num, search=search, sort_by=sort_by, sort_order=sort_order) }}"
+                   class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                    ← Anterior
+                </a>
+            {% endif %}
+
+            {% for page_num in pagination.iter_pages() %}
+                {% if page_num %}
+                    {% if page_num != pagination.page %}
+                        <a href="{{ url_for('documentos_por_tipo', tipo=tipo, page=page_num, search=search, sort_by=sort_by, sort_order=sort_order) }}"
+                           class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                            {{ page_num }}
+                        </a>
+                    {% else %}
+                        <span class="px-3 py-2 text-sm font-medium text-white bg-primary border border-primary rounded-md">
+                            {{ page_num }}
+                        </span>
+                    {% endif %}
+                {% else %}
+                    <span class="px-3 py-2 text-sm font-medium text-gray-300 dark:text-slate-500">...</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if pagination.has_next %}
+                <a href="{{ url_for('documentos_por_tipo', tipo=tipo, page=pagination.next_num, search=search, sort_by=sort_by, sort_order=sort_order) }}"
+                   class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                    Siguiente →
+                </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="text-center py-12">
+    <div class="text-6xl mb-4">📄</div>
+    {% if search %}
+    <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">No hay resultados para la búsqueda</h3>
+    <p class="text-gray-600 dark:text-slate-300 mb-6">Prueba otras palabras o limpia el filtro.</p>
+    <a href="{{ url_for('documentos_por_tipo', tipo=tipo) }}"
+       class="bg-gray-300 hover:bg-gray-400 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-800 dark:text-slate-100 font-bold py-3 px-6 rounded-lg transition duration-300 inline-block">
+        Limpiar búsqueda
+    </a>
+    {% else %}
+    <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">No hay documentos en este tipo</h3>
+    <p class="text-gray-600 dark:text-slate-300 mb-6">Sube uno para que aparezca aquí.</p>
+    {% if tipo.lower() == DOC_TIPO_CERT_RESIDENCIA.lower() %}
+    <a href="{{ url_for('nuevo_certificado', next=request.full_path) }}"
+       class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">
+        Nuevo certificado
+    </a>
+    {% else %}
+    <a href="{{ url_for('nuevo_documento', tipo=tipo) }}"
+       class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">
+        Subir Documento
+    </a>
+    {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+<script>
+let searchTimeout = null;
+const searchEl = document.getElementById('search');
+if (searchEl) {
+    searchEl.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            document.getElementById('searchForm').submit();
+        }, 800);
+    });
+}
+['sort_by', 'sort_order'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => document.getElementById('searchForm').submit());
+});
+</script>
+{% endblock %}
+
