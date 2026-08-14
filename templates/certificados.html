@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/data_table.html" import filter_input, th_label, th_filter, table_toolbar, pagination_nav, table_filter_script, dt_cell %}
+{% from "macros/certificado_preview.html" import certificado_preview_modal, certificado_preview_script %}
 
 {% block title %}Certificados de Residencia - Junta de Vecinos{% endblock %}
 
@@ -87,7 +88,7 @@
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium">
                             <div class="flex space-x-2">
                                 <button type="button"
-                                        data-preview-url="{{ url_for('imprimir_certificado', id=c.id, embed=1) }}"
+                                        data-preview-url="{{ url_for('ver_certificado', id=c.id) }}"
                                         class="btn-preview text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded text-xs">
                                     Vista previa
                                 </button>
@@ -110,29 +111,7 @@
 
 {{ pagination_nav(pagination, 'certificados', page_params) }}
 
-<div id="certPreviewModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
-    <div class="absolute inset-0 bg-black/60" data-close="1"></div>
-    <div class="absolute inset-0 p-4 flex items-center justify-center">
-        <div class="w-full max-w-5xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-2xl overflow-hidden">
-            <div class="px-4 py-3 flex items-center justify-between border-b border-gray-200 dark:border-slate-800">
-                <div class="text-sm font-semibold text-gray-900 dark:text-slate-100">Vista previa: Certificado</div>
-                <div class="flex items-center gap-2">
-                    <button type="button" id="certPreviewPrint"
-                            class="text-sm bg-primary hover:bg-emerald-700 text-white px-3 py-2 rounded-md font-semibold">
-                        Imprimir / PDF
-                    </button>
-                    <button type="button" id="certPreviewClose"
-                            class="text-sm bg-gray-200 hover:bg-gray-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 px-3 py-2 rounded-md">
-                        Cerrar
-                    </button>
-                </div>
-            </div>
-            <div class="bg-gray-50 dark:bg-slate-950">
-                <iframe id="certPreviewFrame" src="about:blank" class="w-full" style="height: min(78vh, 900px); border: 0;"></iframe>
-            </div>
-        </div>
-    </div>
-</div>
+{{ certificado_preview_modal() }}
 
 {% else %}
 <div class="text-center py-12">
@@ -157,46 +136,5 @@
 {% endif %}
 
 {{ table_filter_script() }}
-
-<script>
-(function() {
-    const modal = document.getElementById('certPreviewModal');
-    const frame = document.getElementById('certPreviewFrame');
-    const closeBtn = document.getElementById('certPreviewClose');
-    const printBtn = document.getElementById('certPreviewPrint');
-    if (!modal || !frame || !closeBtn || !printBtn) return;
-
-    function open(url) {
-        frame.src = url;
-        modal.classList.remove('hidden');
-        modal.setAttribute('aria-hidden', 'false');
-        document.addEventListener('keydown', onKeyDown);
-    }
-    function close() {
-        modal.classList.add('hidden');
-        modal.setAttribute('aria-hidden', 'true');
-        frame.src = 'about:blank';
-        document.removeEventListener('keydown', onKeyDown);
-    }
-    function onKeyDown(e) {
-        if (e.key === 'Escape') close();
-    }
-
-    document.querySelectorAll('.btn-preview[data-preview-url]').forEach(btn => {
-        btn.addEventListener('click', () => open(btn.getAttribute('data-preview-url')));
-    });
-    closeBtn.addEventListener('click', close);
-    modal.addEventListener('click', (e) => {
-        if (e.target && e.target.getAttribute && e.target.getAttribute('data-close') === '1') close();
-    });
-    printBtn.addEventListener('click', () => {
-        try {
-            frame.contentWindow.focus();
-            frame.contentWindow.print();
-        } catch (e) {
-            window.open(frame.src.replace('embed=1', ''), '_blank');
-        }
-    });
-})();
-</script>
+{{ certificado_preview_script() }}
 {% endblock %}

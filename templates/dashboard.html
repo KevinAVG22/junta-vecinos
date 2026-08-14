@@ -1,5 +1,7 @@
 {% extends "base.html" %}
-{% from "macros/data_table.html" import filter_input, th_label, th_filter, table_toolbar, pagination_nav, table_filter_script, dt_cell %}
+{% from "macros/data_table.html" import th_label, table_toolbar, pagination_nav, table_filter_script, dt_cell %}
+{% from "macros/vecino_detail.html" import vecino_collapse_panel %}
+{% from "macros/certificado_preview.html" import certificado_preview_modal, certificado_preview_script %}
 
 {% block title %}Dashboard - Junta de Vecinos{% endblock %}
 
@@ -27,7 +29,7 @@
             </a>
         </div>
     </div>
-    <p class="text-gray-600 dark:text-slate-300 mt-2">Gestiona la información de todos los vecinos del cuadrante</p>
+    <p class="text-gray-600 dark:text-slate-300 mt-2">Gestiona la información de todos los vecinos del cuadrante. Haz clic en una fila para ver el detalle.</p>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -45,14 +47,28 @@
     </div>
 </div>
 
-{% if vecinos %}
+{% if total_vecinos > 0 or q %}
 <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
     <form method="GET" action="{{ url_for('dashboard') }}" data-dt-form>
         <input type="hidden" name="sort_by" value="{{ sort_by }}" data-dt-sort-by>
         <input type="hidden" name="sort_order" value="{{ sort_order }}" data-dt-sort-order>
 
-        {{ table_toolbar(url_for('dashboard'), has_filters, 'Mostrando ' ~ pagination.items|length ~ ' de ' ~ vecinos_filtrados ~ ' vecinos' ~ (' (filtrados de ' ~ total_vecinos ~ ' total)' if has_filters else '')) }}
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-950/80">
+            <label for="q" class="sr-only">Buscar vecinos</label>
+            <div class="relative max-w-xl">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input type="text" id="q" name="q" value="{{ q }}"
+                       placeholder="Buscar por nombre, apellido, RUT, domicilio, teléfono o notas…"
+                       class="dashboard-global-search w-full pl-10 pr-3 py-2.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500"
+                       autocomplete="off">
+            </div>
+        </div>
 
+        {{ table_toolbar(url_for('dashboard'), has_filters, 'Mostrando ' ~ (vecinos|length) ~ ' de ' ~ vecinos_filtrados ~ ' vecinos' ~ (' (filtrados de ' ~ total_vecinos ~ ' total)' if has_filters else '')) }}
+
+        {% if vecinos %}
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-800">
                 <thead class="bg-gray-50 dark:bg-slate-950">
@@ -66,45 +82,57 @@
                         {{ th_label('Fecha Registro', true, 'fecha_registro', sort_by, sort_order) }}
                         {{ th_label('Acciones') }}
                     </tr>
-                    <tr class="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800">
-                        {{ th_filter() }}
-                        {{ th_filter(filter_input('f_nombre', f_nombre, placeholder='Nombre…')) }}
-                        {{ th_filter(filter_input('f_apellidos', f_apellidos, placeholder='Apellidos…')) }}
-                        {{ th_filter(filter_input('f_rut', f_rut, placeholder='RUT…')) }}
-                        {{ th_filter(filter_input('f_domicilio', f_domicilio, placeholder='Domicilio…')) }}
-                        {{ th_filter(filter_input('f_telefono', f_telefono, placeholder='Teléfono…')) }}
-                        {{ th_filter() }}
-                        {{ th_filter() }}
-                    </tr>
                 </thead>
                 <tbody class="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-slate-800">
                     {% for vecino in vecinos %}
-                    <tr class="hover:bg-gray-50 dark:hover:bg-slate-800">
-                        {{ dt_cell((pagination.page - 1) * pagination.per_page + loop.index) }}
-                        {{ dt_cell(vecino.nombre, f_nombre) }}
-                        {{ dt_cell(vecino.apellidos, f_apellidos) }}
-                        {{ dt_cell(vecino.rut, f_rut) }}
-                        {{ dt_cell(vecino.domicilio, f_domicilio) }}
-                        {{ dt_cell(vecino.telefono if vecino.telefono else '—', f_telefono) }}
+                    <tr class="vecino-row group hover:bg-gray-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                        data-detail-id="vecino-detail-{{ vecino.id }}"
+                        tabindex="0"
+                        role="button"
+                        aria-expanded="false"
+                        aria-controls="vecino-detail-{{ vecino.id }}">
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-slate-100">
+                            <div class="flex items-center gap-2">
+                                <svg class="vecino-chevron h-4 w-4 text-gray-400 group-hover:text-primary transition-transform duration-200 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                </svg>
+                                <span>{{ (pagination.page - 1) * pagination.per_page + loop.index }}</span>
+                            </div>
+                        </td>
+                        {{ dt_cell(vecino.nombre, q) }}
+                        {{ dt_cell(vecino.apellidos, q) }}
+                        {{ dt_cell(vecino.rut, q) }}
+                        {{ dt_cell(vecino.domicilio, q) }}
+                        {{ dt_cell(vecino.telefono if vecino.telefono else '—', q) }}
                         <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
                             {{ vecino.fecha_registro.strftime('%d/%m/%Y') }}
                         </td>
-                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium">
-                            <div class="flex space-x-2">
-                                <a href="{{ url_for('ver_vecino', id=vecino.id) }}"
-                                   class="text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded text-xs">Ver</a>
-                                <a href="{{ url_for('editar_vecino', id=vecino.id) }}"
-                                   class="text-blue-600 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-xs">Editar</a>
-                                <a href="{{ url_for('eliminar_vecino', id=vecino.id) }}"
-                                   class="text-red-600 hover:text-red-900 bg-red-100 hover:bg-red-200 px-2 py-1 rounded text-xs"
-                                   onclick="return confirm('¿Estás seguro de que quieres eliminar este vecino?')">Eliminar</a>
-                            </div>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium" onclick="event.stopPropagation()">
+                            <a href="{{ url_for('editar_vecino', id=vecino.id) }}"
+                               class="text-blue-600 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-xs">
+                                Editar
+                            </a>
+                        </td>
+                    </tr>
+                    <tr id="vecino-detail-{{ vecino.id }}" class="vecino-detail-row hidden" aria-hidden="true">
+                        <td colspan="8" class="p-0">
+                            {{ vecino_collapse_panel(vecino, certificados_por_vecino.get(vecino.id, [])) }}
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        {% else %}
+        <div class="px-6 py-12 text-center">
+            <div class="text-4xl mb-3">🔍</div>
+            <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">No se encontraron vecinos</h3>
+            <p class="text-gray-600 dark:text-slate-300">
+                No hay resultados para «{{ q }}».
+                <a href="{{ url_for('dashboard') }}" class="text-primary hover:text-emerald-700 ml-1">Limpiar búsqueda</a>
+            </p>
+        </div>
+        {% endif %}
     </form>
 </div>
 
@@ -113,24 +141,104 @@
 {% else %}
 <div class="text-center py-12">
     <div class="text-6xl mb-4">🏘️</div>
-    <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">
-        {% if has_filters %}No se encontraron vecinos con esos filtros{% else %}No hay vecinos registrados{% endif %}
-    </h3>
-    <p class="text-gray-600 dark:text-slate-300 mb-6">
-        {% if has_filters %}
-            <a href="{{ url_for('dashboard') }}" class="text-primary hover:text-emerald-700">Limpiar filtros</a>
-        {% else %}
-            Comienza agregando el primer vecino al sistema
-        {% endif %}
-    </p>
-    {% if not has_filters %}
+    <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">No hay vecinos registrados</h3>
+    <p class="text-gray-600 dark:text-slate-300 mb-6">Comienza agregando el primer vecino al sistema</p>
     <a href="{{ url_for('nuevo_vecino') }}"
        class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">
         Agregar Primer Vecino
     </a>
-    {% endif %}
 </div>
 {% endif %}
 
+{{ certificado_preview_modal() }}
 {{ table_filter_script() }}
+{{ certificado_preview_script() }}
+
+<script>
+(function() {
+    const form = document.querySelector('form[data-dt-form][action*="dashboard"]');
+    const searchInput = document.getElementById('q');
+    if (!form || !searchInput) return;
+
+    let debounceTimer = null;
+
+    function applySearch() {
+        const params = new URLSearchParams();
+        const term = searchInput.value.trim();
+        if (term) params.set('q', term);
+
+        const sortBy = form.querySelector('[data-dt-sort-by]');
+        const sortOrder = form.querySelector('[data-dt-sort-order]');
+        if (sortBy && sortBy.value) params.set('sort_by', sortBy.value);
+        if (sortOrder && sortOrder.value) params.set('sort_order', sortOrder.value);
+
+        const qs = params.toString();
+        window.location.href = form.getAttribute('action') + (qs ? '?' + qs : '');
+    }
+
+    searchInput.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(applySearch, 700);
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            clearTimeout(debounceTimer);
+            applySearch();
+        }
+    });
+
+    searchInput.addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+})();
+</script>
+
+<script>
+(function() {
+    function closeAllDetails() {
+        document.querySelectorAll('.vecino-detail-row').forEach(function(row) {
+            row.classList.add('hidden');
+            row.setAttribute('aria-hidden', 'true');
+        });
+        document.querySelectorAll('.vecino-row').forEach(function(row) {
+            row.setAttribute('aria-expanded', 'false');
+            row.classList.remove('bg-emerald-50', 'dark:bg-emerald-950/30');
+            const chevron = row.querySelector('.vecino-chevron');
+            if (chevron) chevron.classList.remove('rotate-90', 'text-primary');
+        });
+    }
+
+    function toggleRow(row) {
+        const detailId = row.getAttribute('data-detail-id');
+        const detail = document.getElementById(detailId);
+        if (!detail) return;
+
+        const isOpen = !detail.classList.contains('hidden');
+        closeAllDetails();
+        if (!isOpen) {
+            detail.classList.remove('hidden');
+            detail.setAttribute('aria-hidden', 'false');
+            row.setAttribute('aria-expanded', 'true');
+            row.classList.add('bg-emerald-50', 'dark:bg-emerald-950/30');
+            const chevron = row.querySelector('.vecino-chevron');
+            if (chevron) chevron.classList.add('rotate-90', 'text-primary');
+        }
+    }
+
+    document.querySelectorAll('.vecino-row').forEach(function(row) {
+        row.addEventListener('click', function(e) {
+            if (e.target.closest('a, button, input, select, textarea, label')) return;
+            toggleRow(row);
+        });
+        row.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleRow(row);
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}

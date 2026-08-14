@@ -206,6 +206,23 @@ def _order_by_col(query, column, sort_order):
 def _has_any_filter(*values):
     return any(v for v in values if v)
 
+
+def _certificados_por_vecino(vecinos):
+    if not vecinos:
+        return {}
+    certs = CertificadoResidencia.query.filter_by(activo=True).order_by(
+        CertificadoResidencia.fecha.desc()
+    ).all()
+    by_rut = {}
+    for cert in certs:
+        key = _normalize_search_text(cert.rut)
+        if key:
+            by_rut.setdefault(key, []).append(cert)
+    return {
+        v.id: by_rut.get(_normalize_search_text(v.rut), [])
+        for v in vecinos
+    }
+
 # Función para formatear RUT
 def formatear_rut(rut):
     """
@@ -457,6 +474,28 @@ class Vecino(db.Model):
     notas = db.Column(db.Text)
     activo = db.Column(db.Boolean, default=True)
 
+
+def _apply_vecino_search(query, q):
+    if not q:
+        return query
+    term = f'%{q}%'
+    conditions = [
+        Vecino.nombre.ilike(term),
+        Vecino.apellidos.ilike(term),
+        Vecino.domicilio.ilike(term),
+        Vecino.telefono.ilike(term),
+        Vecino.rut.ilike(term),
+        Vecino.notas.ilike(term),
+    ]
+    rut_clean = re.sub(r'[.\-\s]', '', q)
+    if rut_clean:
+        normalized = db.func.replace(
+            db.func.replace(db.func.replace(Vecino.rut, '.', ''), '-', ''), ' ', ''
+        )
+        conditions.append(normalized.ilike(f'%{rut_clean}%'))
+    return query.filter(db.or_(*conditions))
+
+
 class RegistroAccion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
@@ -546,22 +585,14 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    f_nombre = _arg('f_nombre')
-    f_apellidos = _arg('f_apellidos')
-    f_rut = _arg('f_rut')
-    f_domicilio = _arg('f_domicilio')
-    f_telefono = _arg('f_telefono')
+    q = _arg('q')
     sort_by = request.args.get('sort_by', 'nombre')
     sort_order = request.args.get('sort_order', 'asc')
     page = request.args.get('page', 1, type=int)
     per_page = 10
 
     query = Vecino.query.filter_by(activo=True)
-    query = _apply_ilike(query, Vecino.nombre, f_nombre)
-    query = _apply_ilike(query, Vecino.apellidos, f_apellidos)
-    query = _apply_rut_ilike(query, Vecino.rut, f_rut)
-    query = _apply_ilike(query, Vecino.domicilio, f_domicilio)
-    query = _apply_ilike(query, Vecino.telefono, f_telefono)
+    query = _apply_vecino_search(query, q)
 
     sort_col = {
         'nombre': Vecino.nombre,
@@ -575,16 +606,13 @@ def dashboard():
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     vecinos = pagination.items
+    certificados_por_vecino = _certificados_por_vecino(vecinos)
 
     total_vecinos = Vecino.query.filter_by(activo=True).count()
     vecinos_filtrados = query.count()
-    has_filters = _has_any_filter(f_nombre, f_apellidos, f_rut, f_domicilio, f_telefono)
+    has_filters = bool(q)
     page_params = {
-        'f_nombre': f_nombre,
-        'f_apellidos': f_apellidos,
-        'f_rut': f_rut,
-        'f_domicilio': f_domicilio,
-        'f_telefono': f_telefono,
+        'q': q,
         'sort_by': sort_by,
         'sort_order': sort_order,
     }
@@ -597,13 +625,10 @@ def dashboard():
         sort_order=sort_order,
         total_vecinos=total_vecinos,
         vecinos_filtrados=vecinos_filtrados,
-        f_nombre=f_nombre,
-        f_apellidos=f_apellidos,
-        f_rut=f_rut,
-        f_domicilio=f_domicilio,
-        f_telefono=f_telefono,
+        q=q,
         has_filters=has_filters,
         page_params=page_params,
+        certificados_por_vecino=certificados_por_vecino,
     )
 
 @app.route('/exportar-excel')
@@ -1114,6 +1139,41 @@ def imprimir_certificado(id):
 
     embed = (request.args.get('embed') or '').strip().lower() in {'1', 'true', 'si', 'sí', 'yes', 'y'}
     return render_template('certificado_plantilla.html', cert=cert, embed=embed)
+
+
+@app.route('/certificados/<int:id>/ver')
+@login_required
+def ver_certificado(id):
+    """Vista previa embebible: PDF del certificado si existe, si no la plantilla HTML."""
+    cert = CertificadoResidencia.query.get_or_404(id)
+    if not cert.activo:
+        flash('Este certificado está desactivado.', 'error')
+        return redirect(url_for('certificados'))
+
+    if cert.documento_id:
+        doc = Documento.query.get(cert.documento_id)
+        if doc and doc.archivo_ruta and os.path.exists(doc.archivo_ruta):
+            nombre_arch = doc.archivo_nombre or os.path.basename(doc.archivo_ruta)
+            if _documento_permite_vista_previa(nombre_arch):
+                _registrar_movimiento(
+                    entidad='certificado',
+                    entidad_id=cert.id,
+                    accion='ver',
+                    detalles=f"Vista previa de certificado: {cert.nombres} {cert.apellidos} ({cert.rut})"
+                )
+                return send_file(
+                    doc.archivo_ruta,
+                    as_attachment=False,
+                    download_name=nombre_arch,
+                )
+
+    _registrar_movimiento(
+        entidad='certificado',
+        entidad_id=cert.id,
+        accion='ver',
+        detalles=f"Vista previa de certificado (plantilla): {cert.nombres} {cert.apellidos} ({cert.rut})"
+    )
+    return render_template('certificado_plantilla.html', cert=cert, embed=True)
 
 
 @app.route('/certificados/<int:id>/pdf')
