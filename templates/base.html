@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Junta de Vecinos{% endblock %}</title>
+    <title>{% block title %}Nexo{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -58,11 +58,11 @@
                 <a href="{{ url_for('dashboard') }}" class="flex items-center gap-3 min-w-0">
                     <img
                         src="{{ url_for('static', filename='junta_de_vecinos.jpg') }}"
-                        alt="Logo Junta de Vecinos"
+                        alt="Logo Nexo"
                         class="h-10 w-10 rounded-md object-cover flex-shrink-0"
                     >
                     <span class="sidebar-label text-sm font-bold text-gray-900 dark:text-slate-100 leading-tight whitespace-normal break-words">
-                        Junta De Vecino Colon Oriente
+                        Nexo
                     </span>
                 </a>
             </div>
@@ -157,11 +157,11 @@
                         <a href="{{ url_for('index') }}" class="flex items-center gap-3 min-w-0">
                             <img
                                 src="{{ url_for('static', filename='junta_de_vecinos.jpg') }}"
-                                alt="Logo Junta de Vecinos"
+                                alt="Logo Nexo"
                                 class="h-9 w-9 rounded-md object-cover flex-shrink-0"
                             >
                             <span class="text-base font-bold whitespace-nowrap overflow-hidden text-ellipsis">
-                                Junta De Vecinos Colon Oriente
+                                Nexo
                             </span>
                         </a>
                     </div>
@@ -199,7 +199,7 @@
     <footer class="bg-gray-800 text-white {% if not current_user.is_authenticated %}mt-auto{% endif %}">
         <div class="{% if current_user.is_authenticated %}px-6{% else %}max-w-7xl mx-auto px-4 sm:px-6 lg:px-8{% endif %} py-6">
             <div class="text-center">
-                <p>&copy; 2024 Junta de Vecinos. Todos los derechos reservados.</p>
+                <p>&copy; 2024 Nexo. Todos los derechos reservados.</p>
             </div>
         </div>
     </footer>
