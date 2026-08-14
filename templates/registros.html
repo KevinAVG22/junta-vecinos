@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "macros/data_table.html" import filter_input, th_label, th_filter, table_toolbar, pagination_nav, table_filter_script, dt_cell %}
+
+{% block title %}Historial - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="mb-8 flex items-start justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Historial de Movimientos</h1>
+            <p class="text-gray-600 dark:text-slate-300 mt-2">El listado sigue la base de datos: no se muestran movimientos huérfanos si borraste filas a mano. Las acciones «eliminar» sí se conservan aunque el registro ya no exista.</p>
+        </div>
+        <a href="{{ url_for('dashboard') }}"
+           class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+            Volver
+        </a>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
+        <form method="GET" action="{{ url_for('registros') }}" data-dt-form>
+            <input type="hidden" name="sort_by" value="{{ sort_by }}" data-dt-sort-by>
+            <input type="hidden" name="sort_order" value="{{ sort_order }}" data-dt-sort-order>
+
+            {{ table_toolbar(url_for('registros'), has_filters, 'Mostrando ' ~ pagination.items|length ~ ' registros (página ' ~ pagination.page ~ ' de ' ~ (pagination.pages or 1) ~ ')') }}
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-800">
+                    <thead class="bg-gray-50 dark:bg-slate-950">
+                        <tr class="border-b border-gray-200 dark:border-slate-800">
+                            {{ th_label('Fecha/Hora', true, 'fecha_hora', sort_by, sort_order) }}
+                            {{ th_label('Usuario', true, 'usuario', sort_by, sort_order) }}
+                            {{ th_label('Acción', true, 'accion', sort_by, sort_order) }}
+                            {{ th_label('Entidad', true, 'entidad', sort_by, sort_order) }}
+                            {{ th_label('Detalles') }}
+                        </tr>
+                        <tr class="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800">
+                            <th class="px-2 py-2 font-normal">
+                                <div class="flex flex-col gap-1">
+                                    {{ filter_input('f_desde', f_desde, type='date', placeholder='Desde') }}
+                                    {{ filter_input('f_hasta', f_hasta, type='date', placeholder='Hasta') }}
+                                </div>
+                            </th>
+                            {{ th_filter(filter_input('f_usuario', f_usuario, placeholder='ID o nombre…')) }}
+                            {{ th_filter(filter_input('f_accion', f_accion, type='select', placeholder='Todas', options=[('crear', 'crear'), ('editar', 'editar'), ('eliminar', 'eliminar'), ('descargar', 'descargar')])) }}
+                            {{ th_filter(filter_input('f_entidad', f_entidad, placeholder='Entidad…')) }}
+                            {{ th_filter(filter_input('f_detalles', f_detalles, placeholder='Detalles…')) }}
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-slate-800">
+                        {% for r in registros %}
+                        <tr class="hover:bg-gray-50 dark:hover:bg-slate-800">
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                                {{ r.fecha_hora.strftime('%d/%m/%Y %H:%M') }}
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100{% if f_usuario and (r.usuario_nombre|matches_term(f_usuario) or f_usuario == r.usuario_id|string) %} dt-cell-match{% endif %}">
+                                <span class="font-mono text-xs bg-gray-100 dark:bg-slate-950 px-2 py-1 rounded">#{{ r.usuario_id }}</span>
+                                <span class="ml-2 font-medium">{% if f_usuario %}{{ r.usuario_nombre|highlight(f_usuario)|safe }}{% else %}{{ r.usuario_nombre }}{% endif %}</span>
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm{% if f_accion and r.accion == f_accion %} dt-cell-match{% endif %}">
+                                {% if r.accion == 'crear' %}
+                                    <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">crear</span>
+                                {% elif r.accion == 'editar' %}
+                                    <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">editar</span>
+                                {% elif r.accion == 'eliminar' %}
+                                    <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-medium">eliminar</span>
+                                {% elif r.accion == 'descargar' %}
+                                    <span class="bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-medium">descargar</span>
+                                {% else %}
+                                    <span class="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-medium">{{ r.accion }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100{% if f_entidad and (r.entidad|matches_term(f_entidad)) %} dt-cell-match{% endif %}">
+                                {% if r.entidad == 'vecino' %}
+                                    {% if r.accion == 'eliminar' %}
+                                        <span>{% if f_entidad %}{{ ('Vecino #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}Vecino #{{ r.entidad_id }}{% endif %}</span>
+                                    {% else %}
+                                    <a href="{{ url_for('ver_vecino', id=r.entidad_id) }}" class="text-primary hover:text-emerald-700">
+                                        {% if f_entidad %}{{ ('Vecino #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}Vecino #{{ r.entidad_id }}{% endif %}
+                                    </a>
+                                    {% endif %}
+                                {% elif r.entidad == 'certificado' %}
+                                    {% if r.accion == 'eliminar' %}
+                                        <span>{% if f_entidad %}{{ ('Certificado #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}Certificado #{{ r.entidad_id }}{% endif %}</span>
+                                    {% else %}
+                                    <a href="{{ url_for('editar_certificado', id=r.entidad_id) }}" class="text-primary hover:text-emerald-700">
+                                        {% if f_entidad %}{{ ('Certificado #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}Certificado #{{ r.entidad_id }}{% endif %}
+                                    </a>
+                                    {% endif %}
+                                {% elif r.entidad == 'documento' %}
+                                    <span>{% if f_entidad %}{{ ('Documento #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}Documento #{{ r.entidad_id }}{% endif %}</span>
+                                {% elif r.entidad == 'tipo_documento' %}
+                                    <span>{% if f_entidad %}{{ ('Tipo Documento #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}Tipo Documento #{{ r.entidad_id }}{% endif %}</span>
+                                {% else %}
+                                    <span>{% if f_entidad %}{{ (r.entidad ~ ' #' ~ r.entidad_id)|highlight(f_entidad)|safe }}{% else %}{{ r.entidad }} #{{ r.entidad_id }}{% endif %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-3 text-sm text-gray-700 dark:text-slate-200 max-w-xl{% if f_detalles and (r.detalles|matches_term(f_detalles)) %} dt-cell-match{% endif %}">
+                                <div class="whitespace-pre-wrap">{% if f_detalles %}{{ (r.detalles or '')|highlight(f_detalles)|safe }}{% else %}{{ r.detalles or '' }}{% endif %}</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not registros %}
+                        <tr>
+                            <td colspan="5" class="px-6 py-10 text-center text-sm text-gray-500 dark:text-slate-400">
+                                No hay movimientos para mostrar. Los nuevos registros aparecerán cuando uses la aplicación.
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    </div>
+
+    {{ pagination_nav(pagination, 'registros', page_params) }}
+</div>
+
+{{ table_filter_script() }}
+{% endblock %}

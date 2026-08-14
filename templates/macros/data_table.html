@@ -1,0 +1,195 @@
+{# Macros para tablas tipo data-table con filtros y orden en encabezados #}
+
+{% macro filter_input(name, value='', type='text', placeholder='Filtrar…', options=none, extra_class='', form_id='') %}
+{% set cls = 'dt-filter w-full min-w-[5rem] px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 ' ~ extra_class %}
+{% if type == 'select' %}
+<select name="{{ name }}" {% if form_id %}form="{{ form_id }}"{% endif %} class="{{ cls }} dt-filter-select" aria-label="{{ placeholder }}">
+    <option value="">{{ placeholder or 'Todos' }}</option>
+    {% for opt_val, opt_label in options %}
+    <option value="{{ opt_val }}" {% if value == opt_val %}selected{% endif %}>{{ opt_label }}</option>
+    {% endfor %}
+</select>
+{% elif type == 'date' %}
+<input type="date" name="{{ name }}" value="{{ value or '' }}" {% if form_id %}form="{{ form_id }}"{% endif %} class="{{ cls }} dt-filter-date" aria-label="{{ placeholder }}">
+{% else %}
+<input type="text" name="{{ name }}" value="{{ value or '' }}" placeholder="{{ placeholder }}" {% if form_id %}form="{{ form_id }}"{% endif %} class="{{ cls }} dt-filter-text" aria-label="{{ placeholder }}">
+{% endif %}
+{% endmacro %}
+
+{% macro sort_button(label, column, sort_by, sort_order) %}
+<button type="button"
+        class="sort-col group inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-slate-300 hover:text-primary dark:hover:text-emerald-400 transition-colors"
+        data-sort="{{ column }}"
+        aria-label="Ordenar por {{ label }}">
+    <span>{{ label }}</span>
+    <span class="sort-icon inline-flex flex-col leading-none text-[10px] opacity-40 group-hover:opacity-70">
+        {% if sort_by == column %}
+            {% if sort_order == 'asc' %}
+            <span class="text-primary dark:text-emerald-400 opacity-100">▲</span>
+            {% else %}
+            <span class="text-primary dark:text-emerald-400 opacity-100">▼</span>
+            {% endif %}
+        {% else %}
+        <span>⇅</span>
+        {% endif %}
+    </span>
+</button>
+{% endmacro %}
+
+{% macro th_label(label, sortable=false, column='', sort_by='', sort_order='') %}
+<th class="px-3 py-2.5 text-left whitespace-nowrap">
+    {% if sortable and column %}
+        {{ sort_button(label, column, sort_by, sort_order) }}
+    {% else %}
+    <span class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-slate-300">{{ label }}</span>
+    {% endif %}
+</th>
+{% endmacro %}
+
+{% macro th_filter(content='') %}
+<th class="px-2 py-2 font-normal">
+    {{ content }}
+</th>
+{% endmacro %}
+
+{% macro dt_cell(value, term='', extra_class='', nowrap=true) %}
+{% set text = value if value is not none else '' %}
+{% set matches = term and (text|matches_term(term)) %}
+<td class="px-3 py-3 text-sm text-gray-900 dark:text-slate-100 {% if nowrap %}whitespace-nowrap{% endif %} {% if matches %}dt-cell-match{% endif %} {{ extra_class }}">
+    {% if matches %}
+        {{ text|highlight(term)|safe }}
+    {% else %}
+        {{ text }}
+    {% endif %}
+</td>
+{% endmacro %}
+
+{% macro table_toolbar(clear_url, has_filters=false, showing_text='') %}
+<div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-950/80">
+    {% if showing_text %}
+    <p class="text-xs text-gray-600 dark:text-slate-400">{{ showing_text }}</p>
+    {% else %}
+    <span></span>
+    {% endif %}
+    {% if has_filters %}
+    <a href="{{ clear_url }}"
+       class="inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        Limpiar filtros
+    </a>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro pagination_nav(pagination, endpoint, params=none, extra=none) %}
+{% set params = params or {} %}
+{% set extra = extra or {} %}
+{% set url_args = extra|merge_dicts(params) %}
+{% if pagination.pages > 1 %}
+<div class="mt-6 bg-white dark:bg-slate-900 shadow-md rounded-lg p-4 border border-gray-100 dark:border-slate-800">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="text-sm text-gray-700 dark:text-slate-200">
+            Página {{ pagination.page }} de {{ pagination.pages }}
+        </div>
+        <div class="flex flex-wrap gap-2">
+            {% if pagination.has_prev %}
+            <a href="{{ url_for(endpoint, page=pagination.prev_num, **url_args) }}"
+               class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                ← Anterior
+            </a>
+            {% endif %}
+            {% for page_num in pagination.iter_pages() %}
+                {% if page_num %}
+                    {% if page_num != pagination.page %}
+                    <a href="{{ url_for(endpoint, page=page_num, **url_args) }}"
+                       class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                        {{ page_num }}
+                    </a>
+                    {% else %}
+                    <span class="px-3 py-2 text-sm font-medium text-white bg-primary border border-primary rounded-md">
+                        {{ page_num }}
+                    </span>
+                    {% endif %}
+                {% else %}
+                <span class="px-3 py-2 text-sm font-medium text-gray-300 dark:text-slate-500">…</span>
+                {% endif %}
+            {% endfor %}
+            {% if pagination.has_next %}
+            <a href="{{ url_for(endpoint, page=pagination.next_num, **url_args) }}"
+               class="px-3 py-2 text-sm font-medium text-gray-500 dark:text-slate-200 bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800">
+                Siguiente →
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro table_filter_script() %}
+<script>
+(function() {
+    function queryFilterElements(form, selector) {
+        const formId = form.id || '';
+        const seen = new Set();
+        const results = [];
+        const add = (nodes) => {
+            nodes.forEach(function(el) {
+                if (!seen.has(el)) {
+                    seen.add(el);
+                    results.push(el);
+                }
+            });
+        };
+        add(form.querySelectorAll(selector));
+        if (formId) {
+            add(document.querySelectorAll(selector + '[form="' + formId + '"]'));
+        }
+        return results;
+    }
+
+    function bindFilters(form) {
+        const sortByInput = form.querySelector('[data-dt-sort-by]');
+        const sortOrderInput = form.querySelector('[data-dt-sort-order]');
+        if (!sortByInput || !sortOrderInput) return;
+
+        form.querySelectorAll('.sort-col').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                const col = btn.getAttribute('data-sort');
+                if (sortByInput.value === col) {
+                    sortOrderInput.value = sortOrderInput.value === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortByInput.value = col;
+                    sortOrderInput.value = 'asc';
+                }
+                form.submit();
+            });
+        });
+
+        let debounceTimer = null;
+        queryFilterElements(form, '.dt-filter-text').forEach(function(input) {
+            input.addEventListener('input', function() {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(function() { form.submit(); }, 700);
+            });
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(debounceTimer);
+                    form.submit();
+                }
+            });
+        });
+
+        queryFilterElements(form, '.dt-filter-select').forEach(function(el) {
+            el.addEventListener('change', function() { form.submit(); });
+        });
+        queryFilterElements(form, '.dt-filter-date').forEach(function(el) {
+            el.addEventListener('change', function() { form.submit(); });
+        });
+    }
+
+    document.querySelectorAll('[data-dt-form]').forEach(bindFilters);
+})();
+</script>
+{% endmacro %}

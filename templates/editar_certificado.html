@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Certificado - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="mb-8 flex items-start justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Editar Certificado</h1>
+            <p class="text-gray-600 dark:text-slate-300 mt-2">{{ cert.nombres }} {{ cert.apellidos }} ({{ cert.rut }})</p>
+        </div>
+        <a href="{{ url_for('certificados') }}"
+           class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+            Volver
+        </a>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg p-6 border border-gray-100 dark:border-slate-800">
+        <form method="POST" class="space-y-6" enctype="multipart/form-data">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="fecha" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Fecha *</label>
+                    <input type="date" id="fecha" name="fecha" required
+                           value="{{ form_data.fecha if form_data else cert.fecha.isoformat() }}"
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                </div>
+                <div>
+                    <label for="pago" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Pago *</label>
+                    <select id="pago" name="pago" required
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100">
+                        {% set pago_val = (form_data.pago if form_data else ('SI' if cert.pago else 'NO')) %}
+                        <option value="NO" {% if pago_val == 'NO' %}selected{% endif %}>NO</option>
+                        <option value="SI" {% if pago_val == 'SI' %}selected{% endif %}>SI</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="nombres" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Nombres *</label>
+                    <input type="text" id="nombres" name="nombres" required
+                           value="{{ form_data.nombres if form_data else cert.nombres }}"
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400">
+                </div>
+                <div>
+                    <label for="apellidos" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Apellidos *</label>
+                    <input type="text" id="apellidos" name="apellidos" required
+                           value="{{ form_data.apellidos if form_data else cert.apellidos }}"
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="rut" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">RUT *</label>
+                    <input type="text" id="rut" name="rut" required
+                           value="{{ form_data.rut if form_data else cert.rut }}"
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400">
+                </div>
+            </div>
+
+            <div>
+                <label for="direccion" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Dirección *</label>
+                <input type="text" id="direccion" name="direccion" required
+                       value="{{ form_data.direccion if form_data else cert.direccion }}"
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400">
+            </div>
+
+            <div>
+                <label for="presentado_en" class="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Presentado en *</label>
+                <input type="text" id="presentado_en" name="presentado_en" required
+                       value="{{ form_data.presentado_en if form_data else (cert.presentado_en or '') }}"
+                       class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                       placeholder="Ej: Municipalidad / Notaría / Banco / Otro">
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-6">
+                <a href="{{ url_for('certificados') }}"
+                   class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+                    Cancelar
+                </a>
+                <button type="submit"
+                        class="bg-primary hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                    Guardar Cambios
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
