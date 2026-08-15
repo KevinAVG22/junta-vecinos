@@ -1,0 +1,602 @@
+{% extends "base.html" %}
+
+{% block title %}Mapa del Sector - Junta de Vecinos{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="">
+<style>
+    .map-pin-wrap { background: transparent; border: none; }
+    .map-pin {
+        position: relative;
+        width: 34px;
+        height: 34px;
+        border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.22);
+        border: 2px solid #fff;
+    }
+    .map-pin svg {
+        transform: rotate(45deg);
+        width: 16px;
+        height: 16px;
+        color: #fff;
+    }
+    .map-pin-badge {
+        position: absolute;
+        top: -10px;
+        right: -12px;
+        transform: rotate(45deg);
+        min-width: 18px;
+        height: 18px;
+        padding: 0 4px;
+        border-radius: 9999px;
+        background: #f59e0b;
+        color: #111827;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 18px;
+        text-align: center;
+        border: 2px solid #fff;
+    }
+    #mapa-sector { height: min(72vh, 760px); z-index: 0; }
+    .leaflet-container { font-family: inherit; }
+    .leaflet-tooltip.map-pin-tooltip {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 10px;
+        border-radius: 8px;
+        pointer-events: none;
+    }
+    #mapaDomicilioModal { z-index: 1200; }
+    .marker-cluster-map {
+        background-clip: padding-box;
+        border-radius: 50%;
+        border: 2px solid #fff;
+        color: #fff;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .marker-cluster-map.marker-cluster-small {
+        width: 42px !important;
+        height: 42px !important;
+        background: rgba(37, 99, 235, 0.88);
+        font-size: 14px;
+    }
+    .marker-cluster-map.marker-cluster-medium {
+        width: 50px !important;
+        height: 50px !important;
+        background: rgba(5, 150, 105, 0.92);
+        font-size: 15px;
+    }
+    .marker-cluster-map.marker-cluster-large {
+        width: 58px !important;
+        height: 58px !important;
+        background: rgba(220, 38, 38, 0.9);
+        font-size: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+                Mapa del Sector
+            </h1>
+            <p class="text-gray-600 dark:text-slate-300 mt-2">Visualiza la ubicación de todos los vecinos registrados en el cuadrante del sector</p>
+        </div>
+        <a href="{{ url_for('dashboard') }}"
+           class="inline-flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300">
+            ← Volver al Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-blue-50 dark:bg-slate-900 border border-blue-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-blue-900 dark:text-slate-200">Vecinos con Ubicación</p>
+        <p id="stat-ubicacion" class="text-2xl font-bold text-blue-600">—</p>
+    </div>
+    <div class="bg-green-50 dark:bg-slate-900 border border-green-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-green-900 dark:text-slate-200">Pines Activos</p>
+        <p id="stat-pines" class="text-2xl font-bold text-green-600">—</p>
+    </div>
+    <div class="bg-purple-50 dark:bg-slate-900 border border-purple-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-purple-900 dark:text-slate-200">Estado del Mapa</p>
+        <p id="stat-estado" class="text-sm font-semibold text-purple-700 dark:text-purple-300 mt-1">Cargando…</p>
+    </div>
+</div>
+
+<div class="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg shadow-sm overflow-hidden mb-4">
+    <div class="px-4 py-3 border-b border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-950/80 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="btn-centrar"
+                    class="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-2 rounded-md transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 22s8-4.5 8-11a8 8 0 10-16 0c0 6.5 8 11 8 11z"/></svg>
+                Centrar Mapa
+            </button>
+            <button type="button" id="btn-mostrar"
+                    class="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-3 py-2 rounded-md transition-colors">
+                Mostrar Todos los Pines
+            </button>
+            <button type="button" id="btn-ocultar"
+                    class="inline-flex items-center gap-1.5 bg-slate-600 hover:bg-slate-700 text-white text-sm font-semibold px-3 py-2 rounded-md transition-colors">
+                Ocultar Pines
+            </button>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <label for="filtro-mapa" class="text-sm text-gray-600 dark:text-slate-300 whitespace-nowrap">Filtrar por:</label>
+            <select id="filtro-mapa"
+                    class="text-sm border border-gray-300 dark:border-slate-600 rounded-md px-3 py-2 dark:bg-slate-950 dark:text-slate-100">
+                <option value="todos">Todos los vecinos</option>
+                <option value="con_ubicacion">Con ubicación en mapa</option>
+                <option value="sin_ubicacion">Sin ubicación en mapa</option>
+            </select>
+            <button type="button" id="btn-recargar"
+                    class="inline-flex items-center gap-1.5 bg-primary hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-2 rounded-md transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Recargar Datos
+            </button>
+        </div>
+    </div>
+    <div class="px-4 py-2 text-xs text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+        💡 Aleja el mapa para ver grupos resumidos. Al acercar al máximo verás pines con forma de casa; antes, puntos azules/rojos ligeros. Clic para ver detalle. Cuadrante: {{ map_config.cuadrante_calles }} — {{ map_config.sector_context }}
+    </div>
+    <div id="mapa-sector" class="w-full bg-slate-100 dark:bg-slate-950"></div>
+</div>
+
+<div id="panel-sin-ubicacion" class="hidden bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-lg p-4">
+    <h3 class="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2">Vecinos sin ubicación en el mapa</h3>
+    <ul id="lista-sin-ubicacion" class="text-sm text-amber-900/90 dark:text-amber-100/90 space-y-1"></ul>
+    <p class="text-xs text-amber-800/80 dark:text-amber-200/70 mt-2">
+        Si faltan vecinos, el mapa intentará ubicarlos automáticamente. También puedes pulsar «Recargar Datos» para reintentar.
+    </p>
+</div>
+
+<div id="mapaDomicilioModal" class="fixed inset-0 hidden" aria-hidden="true">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-map-modal-close="1"></div>
+    <div class="absolute inset-0 p-4 flex items-center justify-center">
+        <div class="w-full max-w-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-2xl overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-950/80 flex items-start justify-between gap-3">
+                <div>
+                    <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400 font-semibold">Domicilio</p>
+                    <h2 id="mapa-modal-domicilio" class="text-lg font-bold text-gray-900 dark:text-slate-100 mt-1"></h2>
+                    <p id="mapa-modal-resumen" class="text-sm text-gray-600 dark:text-slate-300 mt-1"></p>
+                </div>
+                <button type="button" id="mapa-modal-cerrar"
+                        class="text-sm bg-gray-200 hover:bg-gray-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-900 dark:text-slate-100 px-3 py-2 rounded-md transition-colors shrink-0">
+                    Cerrar
+                </button>
+            </div>
+            <div id="mapa-modal-lista" class="max-h-[min(60vh,420px)] overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800"></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
+<script>
+(function() {
+    const MAP_CONFIG = {{ map_config | tojson }};
+    const QUADRANTE_BOUNDS = [
+        [MAP_CONFIG.bounds.south, MAP_CONFIG.bounds.west],
+        [MAP_CONFIG.bounds.north, MAP_CONFIG.bounds.east],
+    ];
+    const DEFAULT_CENTER = [MAP_CONFIG.center.lat, MAP_CONFIG.center.lng];
+
+    let map = null;
+    let markerLayer = null;
+    let cuadranteLayer = null;
+    let lastData = null;
+    let pinsVisible = true;
+    let mapHasBeenFitted = false;
+    let activeTooltipMarker = null;
+    let lastPinDetailMode = null;
+
+    const PIN_DETAIL_ZOOM = 17;
+    const PIN_DETAIL_MAX_VISIBLE = 90;
+    const houseIconCache = {};
+    const houseSvg = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>';
+
+    function useDetailPinStyle() {
+        if (!map || map.getZoom() < PIN_DETAIL_ZOOM || !lastData) return false;
+        const bounds = map.getBounds();
+        let visible = 0;
+        const marcadores = lastData.marcadores;
+        for (let i = 0; i < marcadores.length; i++) {
+            const m = marcadores[i];
+            if (bounds.contains([m.lat, m.lng])) {
+                visible++;
+                if (visible > PIN_DETAIL_MAX_VISIBLE) return false;
+            }
+        }
+        return visible > 0;
+    }
+
+    function createHousePinIcon(count) {
+        const cacheKey = count > 1 ? 'm' + Math.min(count, 15) : 's';
+        if (houseIconCache[cacheKey]) return houseIconCache[cacheKey];
+        const multi = count > 1;
+        const color = multi ? '#dc2626' : '#2563eb';
+        const badge = multi ? '<span class="map-pin-badge">' + count + '</span>' : '';
+        const icon = L.divIcon({
+            className: 'map-pin-wrap',
+            html: '<div class="map-pin" style="background:' + color + '">' + houseSvg + badge + '</div>',
+            iconSize: [34, 34],
+            iconAnchor: [17, 34],
+        });
+        houseIconCache[cacheKey] = icon;
+        return icon;
+    }
+
+    function totalVecinosEnCluster(cluster) {
+        let total = 0;
+        cluster.getAllChildMarkers().forEach(function(marker) {
+            const data = marker.options.markerData;
+            total += (data && data.count) ? data.count : 1;
+        });
+        return total;
+    }
+
+    function createClusterIcon(cluster) {
+        const total = totalVecinosEnCluster(cluster);
+        let sizeClass = 'marker-cluster-small';
+        if (total >= 40) sizeClass = 'marker-cluster-large';
+        else if (total >= 12) sizeClass = 'marker-cluster-medium';
+        return L.divIcon({
+            html: '<div><span>' + total + '</span></div>',
+            className: 'marker-cluster-map ' + sizeClass,
+            iconSize: L.point(42, 42),
+        });
+    }
+
+    function hideActiveTooltip() {
+        if (activeTooltipMarker) {
+            activeTooltipMarker.closeTooltip();
+            activeTooltipMarker.unbindTooltip();
+            activeTooltipMarker = null;
+        }
+    }
+
+    function showTooltip(markerLayer, markerData) {
+        hideActiveTooltip();
+        const isHouse = markerLayer instanceof L.Marker;
+        markerLayer.bindTooltip(escapeHtml(markerData.domicilio), {
+            direction: 'top',
+            offset: isHouse ? [0, -34] : [0, -8],
+            opacity: 0.96,
+            className: 'map-pin-tooltip',
+            sticky: true,
+        }).openTooltip();
+        activeTooltipMarker = markerLayer;
+    }
+
+    function bindMarkerEvents(layer, marker) {
+        layer.options.markerData = marker;
+        layer.on('mouseover', function() {
+            showTooltip(layer, marker);
+        });
+        layer.on('mouseout', function() {
+            hideActiveTooltip();
+        });
+        layer.on('click', function() {
+            hideActiveTooltip();
+            openDomicilioModal(marker);
+        });
+    }
+
+    function createMapMarker(marker) {
+        if (useDetailPinStyle()) {
+            const pin = L.marker([marker.lat, marker.lng], {
+                icon: createHousePinIcon(marker.count),
+            });
+            bindMarkerEvents(pin, marker);
+            return pin;
+        }
+        const multi = marker.count > 1;
+        const pin = L.circleMarker([marker.lat, marker.lng], {
+            radius: multi ? 9 : 7,
+            fillColor: multi ? '#dc2626' : '#2563eb',
+            fillOpacity: 0.92,
+            color: '#ffffff',
+            weight: 2,
+        });
+        bindMarkerEvents(pin, marker);
+        return pin;
+    }
+
+    function openDomicilioModal(marker) {
+        const modal = document.getElementById('mapaDomicilioModal');
+        const titulo = document.getElementById('mapa-modal-domicilio');
+        const resumen = document.getElementById('mapa-modal-resumen');
+        const lista = document.getElementById('mapa-modal-lista');
+        if (!modal || !titulo || !resumen || !lista) return;
+
+        titulo.textContent = marker.domicilio || 'Sin dirección';
+        resumen.textContent = marker.count + ' persona' + (marker.count === 1 ? '' : 's') + ' registrada' + (marker.count === 1 ? '' : 's') + ' en esta dirección';
+        lista.innerHTML = marker.vecinos.map(function(v) {
+            const nombre = escapeHtml((v.nombre || '') + ' ' + (v.apellidos || ''));
+            const rut = escapeHtml(v.rut || '');
+            const tel = escapeHtml(v.telefono || 'Sin teléfono');
+            const url = '{{ url_for("ver_vecino", id=0) }}'.replace('/0', '/' + v.id);
+            return '<a href="' + url + '" class="block px-5 py-4 hover:bg-gray-50 dark:hover:bg-slate-950/70 transition-colors">'
+                + '<div class="font-semibold text-gray-900 dark:text-slate-100">' + nombre + '</div>'
+                + '<div class="text-sm text-gray-600 dark:text-slate-300 mt-1">' + rut + '</div>'
+                + '<div class="text-sm text-gray-500 dark:text-slate-400 mt-1">' + tel + '</div>'
+                + '</a>';
+        }).join('');
+
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        document.addEventListener('keydown', onModalKeyDown);
+    }
+
+    function closeDomicilioModal() {
+        const modal = document.getElementById('mapaDomicilioModal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+        document.removeEventListener('keydown', onModalKeyDown);
+    }
+
+    function onModalKeyDown(e) {
+        if (e.key === 'Escape') closeDomicilioModal();
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
+    function fitCuadrante() {
+        if (!map) return;
+        map.fitBounds(QUADRANTE_BOUNDS, { padding: [24, 24], maxZoom: 17 });
+    }
+
+    function drawCuadrante() {
+        if (!map || cuadranteLayer) return;
+        const ring = MAP_CONFIG.cuadrante.map(function(p) { return [p.lat, p.lng]; });
+        cuadranteLayer = L.polygon(ring, {
+            color: '#059669',
+            weight: 2,
+            fillColor: '#059669',
+            fillOpacity: 0.08,
+            dashArray: '6 4',
+        }).addTo(map);
+        cuadranteLayer.bindTooltip('Cuadrante Colón Oriente', { sticky: true });
+    }
+
+    function refreshPinStyleIfNeeded() {
+        const detail = useDetailPinStyle();
+        if (detail !== lastPinDetailMode && lastData && pinsVisible) {
+            renderMarkers(lastData, { preserveView: true });
+        }
+    }
+
+    function initMap() {
+        if (map) return;
+        map = L.map('mapa-sector', {
+            scrollWheelZoom: true,
+            preferCanvas: true,
+            zoomAnimation: true,
+            fadeAnimation: false,
+            markerZoomAnimation: false,
+        }).setView(DEFAULT_CENTER, 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            updateWhenIdle: true,
+            updateWhenZooming: false,
+            keepBuffer: 2,
+            attribution: '&copy; OpenStreetMap contributors',
+        }).addTo(map);
+        markerLayer = L.markerClusterGroup({
+            showCoverageOnHover: false,
+            spiderfyOnMaxZoom: false,
+            zoomToBoundsOnClick: true,
+            disableClusteringAtZoom: 19,
+            maxClusterRadius: 58,
+            animate: false,
+            animateAddingMarkers: false,
+            chunkedLoading: true,
+            chunkInterval: 120,
+            chunkDelay: 30,
+            removeOutsideVisibleBounds: true,
+            iconCreateFunction: createClusterIcon,
+        });
+        map.addLayer(markerLayer);
+        map.on('zoomstart', hideActiveTooltip);
+        map.on('movestart', hideActiveTooltip);
+        map.on('zoomend', refreshPinStyleIfNeeded);
+        map.on('moveend', refreshPinStyleIfNeeded);
+        drawCuadrante();
+        fitCuadrante();
+    }
+
+    function renderMarkers(data, options) {
+        options = options || {};
+        hideActiveTooltip();
+        markerLayer.clearLayers();
+        if (!pinsVisible || !data.marcadores.length) {
+            if (!options.preserveView) fitCuadrante();
+            return;
+        }
+
+        const bounds = L.latLngBounds(QUADRANTE_BOUNDS);
+        const layers = [];
+        for (let i = 0; i < data.marcadores.length; i++) {
+            const marker = data.marcadores[i];
+            bounds.extend([marker.lat, marker.lng]);
+            layers.push(createMapMarker(marker));
+        }
+        markerLayer.addLayers(layers);
+        lastPinDetailMode = useDetailPinStyle();
+
+        if (!options.preserveView && !mapHasBeenFitted) {
+            map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });
+            mapHasBeenFitted = true;
+        }
+    }
+
+    function updateStats(data) {
+        document.getElementById('stat-ubicacion').textContent = data.stats.vecinos_con_ubicacion;
+        document.getElementById('stat-pines').textContent = data.stats.pines_activos;
+
+        let estado = 'Datos cargados correctamente';
+        if (data.stats.total_vecinos === 0) {
+            estado = 'No hay vecinos registrados';
+        } else if (data.stats.vecinos_con_ubicacion === 0) {
+            estado = 'Sin ubicaciones geocodificadas';
+        } else if (data.sin_ubicacion.length > 0) {
+            estado = data.stats.vecinos_con_ubicacion + ' ubicados, ' + data.sin_ubicacion.length + ' pendientes';
+        }
+        document.getElementById('stat-estado').textContent = estado;
+
+        const panel = document.getElementById('panel-sin-ubicacion');
+        const lista = document.getElementById('lista-sin-ubicacion');
+        if (data.sin_ubicacion.length) {
+            panel.classList.remove('hidden');
+            lista.innerHTML = data.sin_ubicacion.map(function(v) {
+                return '<li>• <strong>' + escapeHtml(v.nombre + ' ' + v.apellidos) + '</strong> — ' + escapeHtml(v.domicilio) + '</li>';
+            }).join('');
+        } else {
+            panel.classList.add('hidden');
+            lista.innerHTML = '';
+        }
+    }
+
+    async function fetchMapData(filtro) {
+        const params = new URLSearchParams();
+        if (filtro) params.set('filtro', filtro);
+        const res = await fetch('{{ url_for("api_mapa_datos") }}?' + params.toString(), {
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+        });
+        if (!res.ok) throw new Error('No se pudieron cargar los datos del mapa');
+        return res.json();
+    }
+
+    async function loadMap(filtro) {
+        document.getElementById('stat-estado').textContent = 'Cargando…';
+        try {
+            const data = await fetchMapData(filtro);
+            lastData = data;
+            updateStats(data);
+            renderMarkers(data);
+            return data;
+        } catch (err) {
+            document.getElementById('stat-estado').textContent = 'Error al cargar datos';
+            console.error(err);
+            return null;
+        }
+    }
+
+    async function waitForSync() {
+        let attempts = 0;
+        while (attempts < 3600) {
+            const res = await fetch('{{ url_for("api_mapa_sincronizacion") }}', {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            });
+            if (!res.ok) break;
+            const st = await res.json();
+            if (st.running) {
+                const msg = 'Geocodificando vecinos (' + st.done + '/' + st.total + ')…';
+                document.getElementById('stat-estado').textContent = msg;
+                await new Promise(function(r) { setTimeout(r, 2000); });
+                attempts++;
+                continue;
+            }
+            if (st.last_message) {
+                document.getElementById('stat-estado').textContent = st.last_message;
+            }
+            break;
+        }
+    }
+
+    async function geocodeAndReload(auto) {
+        const btn = document.getElementById('btn-recargar');
+        if (!auto) btn.disabled = true;
+        document.getElementById('stat-estado').textContent = 'Iniciando sincronización de vecinos…';
+        try {
+            const res = await fetch('{{ url_for("api_mapa_geocodificar") }}', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            });
+            const result = await res.json();
+            if (result.message) {
+                document.getElementById('stat-estado').textContent = result.message;
+            }
+            await waitForSync();
+            await loadMap(document.getElementById('filtro-mapa').value);
+            return result;
+        } catch (err) {
+            document.getElementById('stat-estado').textContent = 'Error al sincronizar ubicaciones';
+            console.error(err);
+            return null;
+        } finally {
+            if (!auto) {
+                btn.disabled = false;
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Recargar Datos';
+            }
+        }
+    }
+
+    document.getElementById('btn-centrar').addEventListener('click', function() {
+        mapHasBeenFitted = false;
+        fitCuadrante();
+    });
+
+    document.getElementById('btn-mostrar').addEventListener('click', function() {
+        pinsVisible = true;
+        if (lastData) renderMarkers(lastData);
+    });
+
+    document.getElementById('btn-ocultar').addEventListener('click', function() {
+        pinsVisible = false;
+        markerLayer.clearLayers();
+    });
+
+    document.getElementById('filtro-mapa').addEventListener('change', function() {
+        loadMap(this.value);
+    });
+
+    document.getElementById('btn-recargar').addEventListener('click', function() {
+        geocodeAndReload(false);
+    });
+
+    const mapaModal = document.getElementById('mapaDomicilioModal');
+    const mapaModalCerrar = document.getElementById('mapa-modal-cerrar');
+    if (mapaModalCerrar) mapaModalCerrar.addEventListener('click', closeDomicilioModal);
+    if (mapaModal) {
+        mapaModal.addEventListener('click', function(e) {
+            if (e.target && e.target.getAttribute && e.target.getAttribute('data-map-modal-close') === '1') {
+                closeDomicilioModal();
+            }
+        });
+    }
+
+    async function bootstrap() {
+        initMap();
+        const data = await loadMap('todos');
+        if (data && data.stats && data.stats.sin_ubicacion > 0) {
+            await geocodeAndReload(true);
+        }
+    }
+
+    bootstrap();
+})();
+</script>
+{% endblock %}

@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "macros/vecino_ubicacion_mapa.html" import vecino_ubicacion_mapa %}
 
 {% block title %}Editar Vecino - Junta de Vecinos{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto">
+<div class="max-w-3xl mx-auto">
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Editar Vecino</h1>
         <p class="text-gray-600 dark:text-slate-300 mt-2">Modifica la información del vecino: {{ vecino.nombre }} {{ vecino.apellidos }}</p>
@@ -68,6 +69,10 @@
                        placeholder="Ingresa la dirección completa">
             </div>
 
+            {% set lat_val = form_data.latitud if form_data and form_data.latitud else (vecino.latitud if vecino.latitud is not none else '') %}
+            {% set lng_val = form_data.longitud if form_data and form_data.longitud else (vecino.longitud if vecino.longitud is not none else '') %}
+            {{ vecino_ubicacion_mapa(map_config, lat_val, lng_val) }}
+
             <div>
                 <label for="notas" class="block text-sm font-medium text-gray-700 mb-2">
                     Notas Adicionales
@@ -99,7 +104,7 @@
             </div>
             <div class="ml-3">
                 <p class="text-sm text-blue-700 dark:text-slate-200">
-                    Los cambios se guardarán inmediatamente en la base de datos. Los campos marcados con * son obligatorios. El RUT será validado automáticamente.
+                    Los cambios se guardan al instante. Si el vecino no aparece en el mapa, completa latitud/longitud o usa los botones de ubicación.
                 </p>
             </div>
         </div>

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -13,8 +13,69 @@ from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
 import io
 import openpyxl
+import json
+import time
+import ssl
+import threading
+import urllib.parse
+import urllib.request
+import urllib.error
 
 load_dotenv()
+
+MAP_SECTOR_CONTEXT = os.getenv(
+    'MAP_SECTOR_CONTEXT',
+    'Colón Oriente, Las Condes, Santiago, Chile',
+)
+# Cuadrante: Cristóbal Colón, Padre Hurtado Sur, Río Guadiana y Paul Harris
+MAP_CENTER_LAT = float(os.getenv('MAP_CENTER_LAT', '-33.4143'))
+MAP_CENTER_LNG = float(os.getenv('MAP_CENTER_LNG', '-70.5370'))
+MAP_BOUNDS_NORTH = float(os.getenv('MAP_BOUNDS_NORTH', '-33.4119'))
+MAP_BOUNDS_SOUTH = float(os.getenv('MAP_BOUNDS_SOUTH', '-33.4200'))
+MAP_BOUNDS_WEST = float(os.getenv('MAP_BOUNDS_WEST', '-70.5414'))
+MAP_BOUNDS_EAST = float(os.getenv('MAP_BOUNDS_EAST', '-70.5328'))
+MAP_CUADRANTE_CALLES = (
+    'Cristóbal Colón, Padre Hurtado Sur, Río Guadiana y Paul Harris'
+)
+NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
+PHOTON_URL = 'https://photon.komoot.io/api/'
+NOMINATIM_HEADERS = {
+    'User-Agent': 'JuntaDeVecinosColonOriente/1.0 (Las Condes, Chile)',
+    'Accept-Language': 'es',
+}
+_last_geocode_at = 0.0
+_last_photon_at = 0.0
+_last_nominatim_at = 0.0
+_sync_state = {
+    'running': False,
+    'total': 0,
+    'done': 0,
+    'ok': 0,
+    'fail': 0,
+    'last_message': '',
+}
+_sync_thread = None
+_sync_lock = threading.Lock()
+
+
+def _map_config():
+    return {
+        'center': {'lat': MAP_CENTER_LAT, 'lng': MAP_CENTER_LNG},
+        'bounds': {
+            'north': MAP_BOUNDS_NORTH,
+            'south': MAP_BOUNDS_SOUTH,
+            'west': MAP_BOUNDS_WEST,
+            'east': MAP_BOUNDS_EAST,
+        },
+        'cuadrante': [
+            {'lat': MAP_BOUNDS_SOUTH, 'lng': MAP_BOUNDS_WEST},
+            {'lat': MAP_BOUNDS_SOUTH, 'lng': MAP_BOUNDS_EAST},
+            {'lat': MAP_BOUNDS_NORTH, 'lng': MAP_BOUNDS_EAST},
+            {'lat': MAP_BOUNDS_NORTH, 'lng': MAP_BOUNDS_WEST},
+        ],
+        'sector_context': MAP_SECTOR_CONTEXT,
+        'cuadrante_calles': MAP_CUADRANTE_CALLES,
+    }
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'tu-clave-secreta-aqui')
@@ -473,6 +534,602 @@ class Vecino(db.Model):
     fecha_registro = db.Column(db.DateTime, default=db.func.current_timestamp())
     notas = db.Column(db.Text)
     activo = db.Column(db.Boolean, default=True)
+    latitud = db.Column(db.Float, nullable=True)
+    longitud = db.Column(db.Float, nullable=True)
+    geocodificado_en = db.Column(db.DateTime, nullable=True)
+    geocodificacion_error = db.Column(db.String(255), nullable=True)
+    domicilio_mapeado = db.Column(db.String(200), nullable=True)
+
+
+def _normalize_domicilio_key(domicilio):
+    return _normalize_search_text(domicilio)
+
+
+def _rate_limit_geocode():
+    _rate_limit_nominatim()
+
+
+def _rate_limit_photon():
+    global _last_photon_at
+    elapsed = time.time() - _last_photon_at
+    if elapsed < 0.35:
+        time.sleep(0.35 - elapsed)
+    _last_photon_at = time.time()
+
+
+def _rate_limit_nominatim():
+    global _last_nominatim_at
+    elapsed = time.time() - _last_nominatim_at
+    if elapsed < 1.25:
+        time.sleep(1.25 - elapsed)
+    _last_nominatim_at = time.time()
+
+
+_DOMICILIO_CORRECCIONES = (
+    (re.compile(r'\bcierra\s+nevada\b', re.I), 'Sierra Nevada'),
+    (re.compile(r'\bsierra\s+nevada\b', re.I), 'Sierra Nevada'),
+    (re.compile(r'\brio\s+guadiana\b', re.I), 'Río Guadiana'),
+    (re.compile(r'\bleon\s+negro\b', re.I), 'León Negro'),
+    (re.compile(r'\bloma\s+larga\b', re.I), 'Loma Larga'),
+    (re.compile(r'\bcerro\s+altar\b', re.I), 'Cerro Altar'),
+    (re.compile(r'\bpaul\s+harris\b', re.I), 'Paul Harris'),
+    (re.compile(r'\bcristobal\s+colon\b', re.I), 'Cristóbal Colón'),
+    (re.compile(r'\bpadre\s+hurtado\b', re.I), 'Padre Hurtado Sur'),
+)
+
+
+def _normalizar_domicilio_geocodificacion(domicilio):
+    dom = re.sub(r'\s+', ' ', (domicilio or '').strip())
+    if not dom:
+        return dom
+    for pattern, repl in _DOMICILIO_CORRECCIONES:
+        dom = pattern.sub(repl, dom)
+    return dom
+
+
+def _coords_dentro_cuadrante(lat, lng):
+    if lat is None or lng is None:
+        return False
+    return (
+        MAP_BOUNDS_SOUTH <= lat <= MAP_BOUNDS_NORTH
+        and MAP_BOUNDS_WEST <= lng <= MAP_BOUNDS_EAST
+    )
+
+
+def _tiene_ubicacion_mapa(vecino):
+    return vecino.latitud is not None and vecino.longitud is not None
+
+
+def _vecino_necesita_geocodificacion(vecino):
+    dom = (vecino.domicilio or '').strip()
+    if not dom:
+        return False
+    if not _tiene_ubicacion_mapa(vecino):
+        return True
+    mapeado = (vecino.domicilio_mapeado or '').strip()
+    if mapeado != _normalizar_domicilio_geocodificacion(dom):
+        return True
+    return False
+
+
+def _extraer_calle_numero(domicilio):
+    dom = _normalizar_domicilio_geocodificacion(domicilio)
+    m = re.match(r'^(?P<calle>.+?)\s+(?P<numero>\d+\S*)$', dom)
+    if m:
+        return m.group('calle').strip(), m.group('numero').strip()
+    return dom, None
+
+
+def _calles_coinciden(calle_buscada, calle_resultado):
+    a = _normalize_search_text(calle_buscada or '')
+    b = _normalize_search_text(calle_resultado or '')
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
+def _puntuar_candidato_geocodificacion(
+    calle_buscada,
+    numero_buscado,
+    lat,
+    lon,
+    *,
+    housenumber=None,
+    street=None,
+    name=None,
+    osm_type=None,
+    osm_class=None,
+):
+    score = 0
+    street_text = ' '.join(part for part in [street, name] if part).strip()
+    if _calles_coinciden(calle_buscada, street_text):
+        score += 25
+    if numero_buscado and housenumber:
+        hn = str(housenumber).strip()
+        nb = str(numero_buscado).strip()
+        if hn == nb:
+            score += 120
+        elif nb in hn:
+            score += 50
+    elif numero_buscado and not housenumber:
+        score -= 20
+    if _coords_dentro_cuadrante(lat, lon):
+        score += 15
+    if osm_type in {'house', 'building', 'residential', 'address'}:
+        score += 30
+    elif osm_class == 'building':
+        score += 25
+    elif osm_class == 'highway':
+        score -= 15
+    return score
+
+
+def _queries_geocodificacion(domicilio):
+    dom = _normalizar_domicilio_geocodificacion(domicilio)
+    calle, numero = _extraer_calle_numero(dom)
+    queries = []
+    if calle and numero:
+        queries.extend([
+            f"{numero} {calle}, Colón Oriente, Las Condes, Chile",
+            f"Pasaje {calle} {numero}, Colón Oriente, Las Condes, Chile",
+            f"{numero}, Pasaje {calle}, Colón Oriente, Las Condes, Chile",
+            f"{numero} {calle}, Las Condes, Chile",
+        ])
+    queries.extend([
+        f"{dom}, Las Condes, Chile",
+        f"{dom}, {MAP_SECTOR_CONTEXT}",
+        f"{dom}, Colón Oriente, Las Condes, Chile",
+    ])
+    sin_num = re.sub(r'\s+\d+\s*$', '', dom).strip()
+    if sin_num and sin_num.lower() != dom.lower():
+        queries.append(f"{sin_num}, Las Condes, Chile")
+    queries.append(dom)
+    # Eliminar duplicados preservando orden
+    seen = set()
+    unique = []
+    for q in queries:
+        key = q.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(q)
+    return unique
+
+
+def _http_get_json(url, headers, retries=3):
+    ctx = ssl.create_default_context()
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                return json.loads(resp.read().decode('utf-8'))
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code in {429, 503} and attempt < retries - 1:
+                time.sleep(min(30, 5 * (2 ** attempt)))
+                continue
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                time.sleep(2)
+                continue
+            raise last_exc
+    return None
+
+
+def _nominatim_buscar(query, viewbox=None, bounded=False, limit=8):
+    params = {
+        'q': query,
+        'format': 'json',
+        'limit': limit,
+        'countrycodes': 'cl',
+        'addressdetails': '1',
+    }
+    if viewbox:
+        params['viewbox'] = viewbox
+    if bounded:
+        params['bounded'] = '1'
+    url = f"{NOMINATIM_URL}?{urllib.parse.urlencode(params)}"
+    return _http_get_json(url, NOMINATIM_HEADERS)
+
+
+def _nominatim_estructurado(calle, numero):
+    params = {
+        'street': f'{numero} {calle}',
+        'suburb': 'Colón Oriente',
+        'city': 'Las Condes',
+        'country': 'Chile',
+        'format': 'json',
+        'limit': 8,
+        'addressdetails': '1',
+    }
+    url = f"{NOMINATIM_URL}?{urllib.parse.urlencode(params)}"
+    return _http_get_json(url, NOMINATIM_HEADERS)
+
+
+def _photon_buscar(query, calle_buscada=None, numero_buscado=None, limit=10):
+    params = urllib.parse.urlencode({'q': query, 'limit': limit})
+    url = f"{PHOTON_URL}?{params}"
+    data = _http_get_json(
+        url,
+        headers={
+            'User-Agent': NOMINATIM_HEADERS['User-Agent'],
+            'Accept': 'application/json',
+        },
+    )
+
+    candidatos = []
+    for feature in data.get('features', []):
+        props = feature.get('properties') or {}
+        if (props.get('countrycode') or '').upper() != 'CL':
+            continue
+        coords = (feature.get('geometry') or {}).get('coordinates') or []
+        if len(coords) < 2:
+            continue
+        lon, lat = float(coords[0]), float(coords[1])
+        street_text = props.get('street') or props.get('name') or ''
+        score = _puntuar_candidato_geocodificacion(
+            calle_buscada or '',
+            numero_buscado,
+            lat,
+            lon,
+            housenumber=props.get('housenumber'),
+            street=street_text,
+            name=props.get('name'),
+            osm_type=props.get('osm_value'),
+            osm_class=props.get('osm_key'),
+        )
+        exacta = bool(
+            numero_buscado
+            and props.get('housenumber')
+            and str(props.get('housenumber')).strip() == str(numero_buscado).strip()
+        )
+        candidatos.append((score, lat, lon, exacta))
+    candidatos.sort(key=lambda item: -item[0])
+    return candidatos
+
+
+def _seleccionar_resultado_nominatim(results, calle_buscada=None, numero_buscado=None):
+    if not results:
+        return None, None, False
+    candidatos = []
+    for item in results:
+        lat = float(item['lat'])
+        lon = float(item['lon'])
+        address = item.get('address') or {}
+        score = _puntuar_candidato_geocodificacion(
+            calle_buscada or '',
+            numero_buscado,
+            lat,
+            lon,
+            housenumber=address.get('house_number'),
+            street=address.get('road') or address.get('pedestrian') or address.get('living_street'),
+            name=address.get('suburb') or address.get('neighbourhood'),
+            osm_type=item.get('type'),
+            osm_class=item.get('class'),
+        )
+        exacta = bool(
+            numero_buscado
+            and address.get('house_number')
+            and str(address.get('house_number')).strip() == str(numero_buscado).strip()
+        )
+        candidatos.append((score, lat, lon, exacta))
+    candidatos.sort(key=lambda row: -row[0])
+    _, lat, lon, exacta = candidatos[0]
+    return lat, lon, exacta
+
+
+def _resultado_geocodificacion(lat, lon, exacta, calle_buscada, numero_buscado):
+    if lat is None or lon is None:
+        return None, None, 'Sin resultados de geocodificación', False
+    if _coords_dentro_cuadrante(lat, lon):
+        if exacta:
+            return lat, lon, None, True
+        if numero_buscado:
+            return lat, lon, 'Ubicación aproximada en la calle (número no disponible en el mapa)', False
+        return lat, lon, None, False
+    aviso = 'Ubicación fuera del cuadrante del sector'
+    if not exacta and numero_buscado:
+        aviso = 'Ubicación aproximada fuera del cuadrante del sector'
+    return lat, lon, aviso, exacta
+
+
+def _geocodificar_domicilio(domicilio):
+    domicilio = _normalizar_domicilio_geocodificacion(domicilio)
+    if not domicilio:
+        return None, None, 'Domicilio vacío', False
+
+    calle, numero = _extraer_calle_numero(domicilio)
+    queries = _queries_geocodificacion(domicilio)
+    return _geocodificar_domicilio_osm(domicilio, calle, numero, queries)
+
+
+def _geocodificar_domicilio_osm(domicilio, calle, numero, queries):
+    viewbox = f"{MAP_BOUNDS_WEST},{MAP_BOUNDS_NORTH},{MAP_BOUNDS_EAST},{MAP_BOUNDS_SOUTH}"
+    last_error = 'Sin resultados de geocodificación'
+    mejor = None
+
+    def _evaluar_candidatos(candidatos):
+        nonlocal mejor
+        for score, lat, lon, exacta in candidatos:
+            if score <= 0:
+                continue
+            if mejor is None or score > mejor[0] or (score == mejor[0] and exacta and not mejor[3]):
+                mejor = (score, lat, lon, exacta)
+
+    if calle and numero:
+        _rate_limit_nominatim()
+        try:
+            data = _nominatim_estructurado(calle, numero)
+            if data:
+                lat, lon, exacta = _seleccionar_resultado_nominatim(
+                    data, calle_buscada=calle, numero_buscado=numero
+                )
+                if lat is not None:
+                    return _resultado_geocodificacion(lat, lon, exacta, calle, numero)
+        except Exception as exc:
+            last_error = str(exc) or 'Error en búsqueda estructurada'
+
+    for query in queries[:4]:
+        _rate_limit_photon()
+        try:
+            candidatos = _photon_buscar(query, calle_buscada=calle, numero_buscado=numero)
+            _evaluar_candidatos(candidatos)
+        except Exception as exc:
+            last_error = str(exc) or 'Error en geocodificación alternativa'
+
+    estrategias = [
+        {'viewbox': viewbox, 'bounded': False},
+        {'viewbox': None, 'bounded': False},
+    ]
+
+    for query in queries[:3]:
+        for strategy in estrategias:
+            _rate_limit_nominatim()
+            try:
+                data = _nominatim_buscar(
+                    query,
+                    viewbox=strategy['viewbox'],
+                    bounded=strategy['bounded'],
+                )
+                if data:
+                    lat, lon, exacta = _seleccionar_resultado_nominatim(
+                        data, calle_buscada=calle, numero_buscado=numero
+                    )
+                    if lat is not None:
+                        score = _puntuar_candidato_geocodificacion(
+                            calle, numero, lat, lon,
+                            housenumber=numero if exacta else None,
+                            street=calle,
+                        )
+                        if mejor is None or score > mejor[0]:
+                            mejor = (score, lat, lon, exacta)
+            except urllib.error.HTTPError as exc:
+                last_error = f'Servicio de mapas respondió HTTP {exc.code}'
+                if exc.code in {403, 429}:
+                    break
+            except Exception as exc:
+                last_error = str(exc) or 'Error al consultar el servicio de mapas'
+
+    if mejor:
+        _, lat, lon, exacta = mejor
+        return _resultado_geocodificacion(lat, lon, exacta, calle, numero)
+
+    return None, None, last_error, False
+
+
+def _parse_coord(value):
+    if value is None:
+        return None
+    s = str(value).strip().replace(',', '.')
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _aplicar_ubicacion_vecino(vecino, lat_str=None, lng_str=None, geocodificar_si_falta=True):
+    lat = _parse_coord(lat_str)
+    lng = _parse_coord(lng_str)
+    dom = (vecino.domicilio or '').strip()
+    if lat is not None and lng is not None:
+        vecino.latitud = lat
+        vecino.longitud = lng
+        vecino.geocodificado_en = datetime.datetime.utcnow()
+        vecino.domicilio_mapeado = _normalizar_domicilio_geocodificacion(dom)
+        if _coords_dentro_cuadrante(lat, lng):
+            vecino.geocodificacion_error = None
+        else:
+            vecino.geocodificacion_error = 'Coordenadas fuera del cuadrante del sector'
+        return True
+    if geocodificar_si_falta and dom:
+        return _geocodificar_vecino(vecino)
+    return False
+
+
+def _form_vecino_desde_request():
+    return {
+        'nombre': request.form['nombre'].strip(),
+        'apellidos': request.form['apellidos'].strip(),
+        'telefono': request.form['telefono'].strip(),
+        'domicilio': request.form['domicilio'].strip(),
+        'rut': request.form['rut'].strip(),
+        'notas': request.form['notas'].strip(),
+        'latitud': request.form.get('latitud', '').strip(),
+        'longitud': request.form.get('longitud', '').strip(),
+    }
+
+
+def _geocodificar_vecino(vecino):
+    dom = (vecino.domicilio or '').strip()
+    lat, lon, err, exacta = _geocodificar_domicilio(dom)
+    vecino.geocodificado_en = datetime.datetime.utcnow()
+    if lat is not None and lon is not None:
+        vecino.latitud = lat
+        vecino.longitud = lon
+        vecino.domicilio_mapeado = _normalizar_domicilio_geocodificacion(dom)
+        if err:
+            vecino.geocodificacion_error = err
+        elif _coords_dentro_cuadrante(lat, lon):
+            vecino.geocodificacion_error = None
+        else:
+            vecino.geocodificacion_error = 'Ubicación fuera del cuadrante del sector'
+        return True
+    vecino.latitud = None
+    vecino.longitud = None
+    vecino.geocodificacion_error = err or 'No se pudo geocodificar la dirección'
+    return False
+
+
+def _vecinos_pendientes_ubicacion():
+    return [
+        v for v in Vecino.query.filter_by(activo=True).order_by(Vecino.id.asc()).all()
+        if _vecino_necesita_geocodificacion(v)
+    ]
+
+
+def _sincronizar_ubicaciones_vecinos(force=False):
+    global _sync_state
+    if force:
+        pendiente_ids = [
+            v.id for v in Vecino.query.filter_by(activo=True).order_by(Vecino.id.asc()).all()
+            if (v.domicilio or '').strip()
+        ]
+    else:
+        pendiente_ids = [v.id for v in _vecinos_pendientes_ubicacion()]
+
+    _sync_state.update({
+        'total': len(pendiente_ids),
+        'done': 0,
+        'ok': 0,
+        'fail': 0,
+    })
+    try:
+        for idx, vecino_id in enumerate(pendiente_ids, start=1):
+            vecino = db.session.get(Vecino, vecino_id)
+            if not vecino or not vecino.activo:
+                continue
+            if _geocodificar_vecino(vecino):
+                _sync_state['ok'] += 1
+            else:
+                _sync_state['fail'] += 1
+            _sync_state['done'] = idx
+            db.session.commit()
+        _sync_state['last_message'] = (
+            f"Listo: {_sync_state['ok']} ubicados, {_sync_state['fail']} sin ubicación."
+        )
+    except Exception as exc:
+        db.session.rollback()
+        _sync_state['last_message'] = str(exc)
+        raise
+    finally:
+        _sync_state['running'] = False
+    return dict(_sync_state)
+
+
+def _iniciar_sincronizacion_ubicaciones(force=False):
+    global _sync_thread
+    with _sync_lock:
+        if _sync_state['running']:
+            return False
+        if force:
+            total = Vecino.query.filter_by(activo=True).filter(
+                Vecino.domicilio.isnot(None), Vecino.domicilio != ''
+            ).count()
+            if not total:
+                _sync_state['last_message'] = 'No hay vecinos con domicilio para sincronizar.'
+                return False
+        else:
+            pendientes = _vecinos_pendientes_ubicacion()
+            if not pendientes:
+                _sync_state['last_message'] = 'Todos los vecinos ya tienen ubicación guardada.'
+                return False
+            total = len(pendientes)
+        _sync_state.update({
+            'running': True,
+            'total': total,
+            'done': 0,
+            'ok': 0,
+            'fail': 0,
+            'last_message': f'Sincronizando {total} vecino(s)...',
+        })
+
+        def worker():
+            with app.app_context():
+                try:
+                    _sincronizar_ubicaciones_vecinos(force=force)
+                except Exception:
+                    db.session.rollback()
+
+        _sync_thread = threading.Thread(target=worker, daemon=True, name='sync-ubicaciones-vecinos')
+        _sync_thread.start()
+    return True
+
+
+def _estado_sincronizacion_mapa():
+    pendientes = len(_vecinos_pendientes_ubicacion())
+    return {
+        **_sync_state,
+        'pendientes': pendientes,
+    }
+
+
+def _clave_grupo_marcador(vecino):
+    domicilio_key = _normalize_domicilio_key(vecino.domicilio)
+    if not domicilio_key:
+        return None
+    lat_key = round(float(vecino.latitud), 4)
+    lng_key = round(float(vecino.longitud), 4)
+    return f'{domicilio_key}|{lat_key}|{lng_key}'
+
+
+def _marcadores_mapa_desde_vecinos(vecinos):
+    grupos = {}
+    for vecino in vecinos:
+        if not _tiene_ubicacion_mapa(vecino):
+            continue
+        key = _clave_grupo_marcador(vecino)
+        if not key:
+            continue
+        if key not in grupos:
+            grupos[key] = {
+                'domicilio': vecino.domicilio,
+                'lat': vecino.latitud,
+                'lng': vecino.longitud,
+                'vecinos': [],
+            }
+        grupos[key]['vecinos'].append({
+            'id': vecino.id,
+            'nombre': vecino.nombre,
+            'apellidos': vecino.apellidos,
+            'rut': vecino.rut,
+            'telefono': vecino.telefono or '',
+        })
+
+    marcadores = []
+    for grupo in grupos.values():
+        marcadores.append({
+            **grupo,
+            'count': len(grupo['vecinos']),
+        })
+    marcadores.sort(key=lambda m: (-m['count'], m['domicilio'].lower()))
+    return marcadores
+
+
+def _stats_mapa(vecinos):
+    con_ubicacion = [v for v in vecinos if _tiene_ubicacion_mapa(v)]
+    en_cuadrante = [v for v in con_ubicacion if _coords_dentro_cuadrante(v.latitud, v.longitud)]
+    marcadores = _marcadores_mapa_desde_vecinos(con_ubicacion)
+    return {
+        'total_vecinos': len(vecinos),
+        'vecinos_con_ubicacion': len(con_ubicacion),
+        'vecinos_en_cuadrante': len(en_cuadrante),
+        'pines_activos': len(marcadores),
+        'sin_ubicacion': len(vecinos) - len(con_ubicacion),
+    }
 
 
 def _apply_vecino_search(query, q):
@@ -630,6 +1287,106 @@ def dashboard():
         page_params=page_params,
         certificados_por_vecino=certificados_por_vecino,
     )
+
+
+@app.route('/mapa')
+@login_required
+def mapa_sector():
+    cfg = _map_config()
+    return render_template(
+        'mapa_sector.html',
+        map_config=cfg,
+    )
+
+
+@app.route('/api/mapa/datos')
+@login_required
+def api_mapa_datos():
+    filtro = (request.args.get('filtro') or 'todos').strip().lower()
+    vecinos = Vecino.query.filter_by(activo=True).order_by(Vecino.domicilio.asc()).all()
+
+    if filtro == 'con_ubicacion':
+        vecinos = [v for v in vecinos if _tiene_ubicacion_mapa(v)]
+    elif filtro == 'sin_ubicacion':
+        vecinos = [v for v in vecinos if _vecino_necesita_geocodificacion(v) or not _tiene_ubicacion_mapa(v)]
+
+    marcadores = _marcadores_mapa_desde_vecinos(vecinos)
+    stats = _stats_mapa(Vecino.query.filter_by(activo=True).all())
+
+    sin_ubicacion = [{
+        'id': v.id,
+        'nombre': v.nombre,
+        'apellidos': v.apellidos,
+        'domicilio': v.domicilio,
+        'error': v.geocodificacion_error or '',
+    } for v in Vecino.query.filter_by(activo=True).order_by(Vecino.domicilio.asc()).all()
+        if _vecino_necesita_geocodificacion(v)]
+
+    cfg = _map_config()
+    return jsonify({
+        **cfg,
+        'stats': stats,
+        'marcadores': marcadores,
+        'sin_ubicacion': sin_ubicacion,
+        'status': 'ok' if marcadores or not sin_ubicacion else 'sin_datos',
+    })
+
+
+@app.route('/api/geocodificar-domicilio', methods=['POST'])
+@login_required
+def api_geocodificar_domicilio():
+    data = request.get_json(silent=True) or {}
+    domicilio = (data.get('domicilio') or request.form.get('domicilio') or '').strip()
+    if not domicilio:
+        return jsonify({'ok': False, 'error': 'Ingresa un domicilio.'}), 400
+    lat, lon, err, exacta = _geocodificar_domicilio(domicilio)
+    if lat is None or lon is None:
+        return jsonify({
+            'ok': False,
+            'error': err or 'No se encontraron coordenadas para esa dirección.',
+            'sugerencia': 'Prueba con calle y número (ej: Paul Harris 1234) o usa «Seleccionar en el Mapa».',
+        }), 422
+    return jsonify({
+        'ok': True,
+        'lat': lat,
+        'lng': lon,
+        'en_cuadrante': _coords_dentro_cuadrante(lat, lon),
+        'aviso': err,
+        'exacta': exacta,
+    })
+
+
+@app.route('/api/mapa/sincronizacion')
+@login_required
+def api_mapa_sincronizacion():
+    return jsonify(_estado_sincronizacion_mapa())
+
+
+@app.route('/api/mapa/geocodificar', methods=['POST'])
+@login_required
+def api_mapa_geocodificar():
+    data = request.get_json(silent=True) or {}
+    force = str(request.args.get('force') or data.get('force') or '').lower() in {'1', 'true', 'si', 'sí', 'yes'}
+    iniciada = _iniciar_sincronizacion_ubicaciones(force=force)
+    estado = _estado_sincronizacion_mapa()
+    if iniciada:
+        return jsonify({
+            'status': 'started',
+            'message': f"Sincronizando {estado['total']} vecino(s) en segundo plano...",
+            **estado,
+        })
+    if estado['running']:
+        return jsonify({
+            'status': 'running',
+            'message': 'La sincronización ya está en curso.',
+            **estado,
+        })
+    return jsonify({
+        'status': 'idle',
+        'message': estado['last_message'] or 'No hay vecinos pendientes de ubicación.',
+        **estado,
+    })
+
 
 @app.route('/exportar-excel')
 @login_required
@@ -1508,21 +2265,15 @@ def nuevo_vecino():
     if request.method == 'POST':
         rut = request.form['rut'].strip()
         es_valido, mensaje_error = validar_rut(rut)
-        form_data = {
-            'nombre': request.form['nombre'].strip(),
-            'apellidos': request.form['apellidos'].strip(),
-            'telefono': request.form['telefono'].strip(),
-            'domicilio': request.form['domicilio'].strip(),
-            'rut': rut,
-            'notas': request.form['notas'].strip()
-        }
+        form_data = _form_vecino_desde_request()
+        form_data['rut'] = rut
         if not es_valido:
             flash(f'Error en RUT: {mensaje_error}', 'error')
-            return render_template('nuevo_vecino.html', form_data=form_data)
+            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config())
         existe, vecino_existente = rut_existe(rut)
         if existe:
             flash(f'El RUT ya está registrado por {vecino_existente.nombre} {vecino_existente.apellidos}', 'error')
-            return render_template('nuevo_vecino.html', form_data=form_data)
+            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config())
         rut_formateado = formatear_rut(rut)
         vecino = Vecino(
             nombre=form_data['nombre'],
@@ -1533,6 +2284,7 @@ def nuevo_vecino():
             notas=form_data['notas']
         )
         db.session.add(vecino)
+        _aplicar_ubicacion_vecino(vecino, form_data['latitud'], form_data['longitud'])
         db.session.commit()
         # Registrar acción de creación
         registro = RegistroAccion(
@@ -1552,7 +2304,7 @@ def nuevo_vecino():
         )
         flash('Vecino agregado exitosamente', 'success')
         return redirect(url_for('dashboard'))
-    return render_template('nuevo_vecino.html', form_data=None)
+    return render_template('nuevo_vecino.html', form_data=None, map_config=_map_config())
 
 @app.route('/vecinos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -1583,21 +2335,15 @@ def editar_vecino(id):
     if request.method == 'POST':
         rut = request.form['rut'].strip()
         es_valido, mensaje_error = validar_rut(rut)
-        form_data = {
-            'nombre': request.form['nombre'].strip(),
-            'apellidos': request.form['apellidos'].strip(),
-            'telefono': request.form['telefono'].strip(),
-            'domicilio': request.form['domicilio'].strip(),
-            'rut': rut,
-            'notas': request.form['notas'].strip()
-        }
+        form_data = _form_vecino_desde_request()
+        form_data['rut'] = rut
         if not es_valido:
             flash(f'Error en RUT: {mensaje_error}', 'error')
-            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data)
+            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config())
         existe, vecino_existente = rut_existe(rut, vecino.id)
         if existe:
             flash(f'El RUT ya está registrado por {vecino_existente.nombre} {vecino_existente.apellidos}', 'error')
-            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data)
+            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config())
         rut_formateado = formatear_rut(rut)
         cambios = []
         if vecino.nombre != form_data['nombre']:
@@ -1612,12 +2358,31 @@ def editar_vecino(id):
             cambios.append(f"RUT: '{vecino.rut}' → '{rut_formateado}'")
         if vecino.notas != form_data['notas']:
             cambios.append(f"Notas: '{vecino.notas}' → '{form_data['notas']}'")
+        domicilio_cambio = vecino.domicilio != form_data['domicilio']
+        old_lat = vecino.latitud
+        old_lng = vecino.longitud
+        lat_new = _parse_coord(form_data['latitud'])
+        lng_new = _parse_coord(form_data['longitud'])
+        coords_cambiaron = (
+            lat_new is not None and lng_new is not None
+            and (
+                old_lat is None or old_lng is None
+                or abs(lat_new - old_lat) > 1e-6
+                or abs(lng_new - old_lng) > 1e-6
+            )
+        )
         vecino.nombre = form_data['nombre']
         vecino.apellidos = form_data['apellidos']
         vecino.telefono = form_data['telefono']
         vecino.domicilio = form_data['domicilio']
         vecino.rut = rut_formateado
         vecino.notas = form_data['notas']
+        if coords_cambiaron:
+            _aplicar_ubicacion_vecino(
+                vecino, form_data['latitud'], form_data['longitud'], geocodificar_si_falta=False
+            )
+        elif domicilio_cambio or _vecino_necesita_geocodificacion(vecino):
+            _geocodificar_vecino(vecino)
         db.session.commit()
         # Registrar acción de edición
         registro = RegistroAccion(
@@ -1637,7 +2402,7 @@ def editar_vecino(id):
         )
         flash('Vecino actualizado exitosamente', 'success')
         return redirect(url_for('dashboard'))
-    return render_template('editar_vecino.html', vecino=vecino, form_data=None)
+    return render_template('editar_vecino.html', vecino=vecino, form_data=None, map_config=_map_config())
 
 @app.route('/vecinos/<int:id>/eliminar')
 @login_required
@@ -1823,77 +2588,114 @@ def verificar_rut_api():
     
     return {'valido': True, 'mensaje': 'RUT válido y disponible'}
 
+
+_db_schema_ready = False
+
+
+def _ensure_db_schema():
+    global _db_schema_ready
+    if _db_schema_ready:
+        return
+    db.create_all()
+    # Migración simple: asegurar columna Usuario.role exista ANTES de consultas ORM
+    try:
+        inspector = db.inspect(db.engine)
+        if inspector.has_table('usuario'):
+            cols = {c['name'] for c in inspector.get_columns('usuario')}
+            if 'role' not in cols:
+                db.session.execute(db.text("ALTER TABLE usuario ADD COLUMN role VARCHAR(30) NOT NULL DEFAULT 'Asistente'"))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Migración simple: asegurar columnas de Vecino (activo, mapa, etc.)
+    try:
+        inspector = db.inspect(db.engine)
+        if inspector.has_table('vecino'):
+            cols = {c['name'] for c in inspector.get_columns('vecino')}
+            if 'activo' not in cols:
+                db.session.execute(db.text("ALTER TABLE vecino ADD COLUMN activo TINYINT(1) NOT NULL DEFAULT 1"))
+                db.session.commit()
+            cols = {c['name'] for c in inspector.get_columns('vecino')}
+            map_cols = {
+                'latitud': "ALTER TABLE vecino ADD COLUMN latitud DOUBLE NULL",
+                'longitud': "ALTER TABLE vecino ADD COLUMN longitud DOUBLE NULL",
+                'geocodificado_en': "ALTER TABLE vecino ADD COLUMN geocodificado_en DATETIME NULL",
+                'geocodificacion_error': "ALTER TABLE vecino ADD COLUMN geocodificacion_error VARCHAR(255) NULL",
+                'domicilio_mapeado': "ALTER TABLE vecino ADD COLUMN domicilio_mapeado VARCHAR(200) NULL",
+            }
+            for col_name, ddl in map_cols.items():
+                if col_name not in cols:
+                    db.session.execute(db.text(ddl))
+                    db.session.commit()
+                    cols.add(col_name)
+            db.session.execute(db.text(
+                "UPDATE vecino SET domicilio_mapeado = domicilio "
+                "WHERE activo = 1 AND latitud IS NOT NULL AND longitud IS NOT NULL "
+                "AND (domicilio_mapeado IS NULL OR domicilio_mapeado = '')"
+            ))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Migración simple: asegurar columna CertificadoResidencia.pago exista
+    try:
+        inspector = db.inspect(db.engine)
+        if inspector.has_table('certificado_residencia'):
+            cols = {c['name'] for c in inspector.get_columns('certificado_residencia')}
+            if 'pago' not in cols:
+                db.session.execute(db.text("ALTER TABLE certificado_residencia ADD COLUMN pago TINYINT(1) NOT NULL DEFAULT 0"))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Migración simple: asegurar columna CertificadoResidencia.presentado_en exista
+    try:
+        inspector = db.inspect(db.engine)
+        if inspector.has_table('certificado_residencia'):
+            cols = {c['name'] for c in inspector.get_columns('certificado_residencia')}
+            if 'presentado_en' not in cols:
+                db.session.execute(db.text("ALTER TABLE certificado_residencia ADD COLUMN presentado_en VARCHAR(200) NULL"))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Migración simple: asegurar columna CertificadoResidencia.documento_id exista
+    try:
+        inspector = db.inspect(db.engine)
+        if inspector.has_table('certificado_residencia'):
+            cols = {c['name'] for c in inspector.get_columns('certificado_residencia')}
+            if 'documento_id' not in cols:
+                db.session.execute(db.text("ALTER TABLE certificado_residencia ADD COLUMN documento_id INT NULL"))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Crear usuario admin por defecto si no existe
+    if not Usuario.query.filter_by(username='admin').first():
+        admin = Usuario(username='admin', email='admin@junta.com', es_admin=True, role='Admin')
+        admin.set_password('admin123')
+        db.session.add(admin)
+        db.session.commit()
+
+    # Backfill: si es_admin -> Admin
+    try:
+        db.session.execute(db.text("UPDATE usuario SET role='Admin' WHERE (es_admin=1 OR es_admin=true) AND (role IS NULL OR role='')"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    _db_schema_ready = True
+
+
+@app.before_request
+def _init_db_schema_once():
+    _ensure_db_schema()
+
+
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()
-        # Migración simple: asegurar columna Usuario.role exista ANTES de consultas ORM
-        try:
-            inspector = db.inspect(db.engine)
-            if inspector.has_table('usuario'):
-                cols = {c['name'] for c in inspector.get_columns('usuario')}
-                if 'role' not in cols:
-                    db.session.execute(db.text("ALTER TABLE usuario ADD COLUMN role VARCHAR(30) NOT NULL DEFAULT 'Asistente'"))
-                    db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # Migración simple: asegurar columna Vecino.activo exista
-        try:
-            inspector = db.inspect(db.engine)
-            if inspector.has_table('vecino'):
-                cols = {c['name'] for c in inspector.get_columns('vecino')}
-                if 'activo' not in cols:
-                    db.session.execute(db.text("ALTER TABLE vecino ADD COLUMN activo TINYINT(1) NOT NULL DEFAULT 1"))
-                    db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # Migración simple: asegurar columna CertificadoResidencia.pago exista
-        try:
-            inspector = db.inspect(db.engine)
-            if inspector.has_table('certificado_residencia'):
-                cols = {c['name'] for c in inspector.get_columns('certificado_residencia')}
-                if 'pago' not in cols:
-                    db.session.execute(db.text("ALTER TABLE certificado_residencia ADD COLUMN pago TINYINT(1) NOT NULL DEFAULT 0"))
-                    db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # Migración simple: asegurar columna CertificadoResidencia.presentado_en exista
-        try:
-            inspector = db.inspect(db.engine)
-            if inspector.has_table('certificado_residencia'):
-                cols = {c['name'] for c in inspector.get_columns('certificado_residencia')}
-                if 'presentado_en' not in cols:
-                    db.session.execute(db.text("ALTER TABLE certificado_residencia ADD COLUMN presentado_en VARCHAR(200) NULL"))
-                    db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # Migración simple: asegurar columna CertificadoResidencia.documento_id exista
-        try:
-            inspector = db.inspect(db.engine)
-            if inspector.has_table('certificado_residencia'):
-                cols = {c['name'] for c in inspector.get_columns('certificado_residencia')}
-                if 'documento_id' not in cols:
-                    db.session.execute(db.text("ALTER TABLE certificado_residencia ADD COLUMN documento_id INT NULL"))
-                    db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # Crear usuario admin por defecto si no existe
-        if not Usuario.query.filter_by(username='admin').first():
-            admin = Usuario(username='admin', email='admin@junta.com', es_admin=True, role='Admin')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            db.session.commit()
-
-        # Backfill: si es_admin -> Admin
-        try:
-            db.session.execute(db.text("UPDATE usuario SET role='Admin' WHERE (es_admin=1 OR es_admin=true) AND (role IS NULL OR role='')"))
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
+        _ensure_db_schema()
     
     # host='0.0.0.0' permite acceso desde la LAN (ej. http://192.168.1.93:5000)
     app.run(debug=True, host='0.0.0.0', port=5000)

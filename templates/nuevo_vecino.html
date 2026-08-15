@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "macros/vecino_ubicacion_mapa.html" import vecino_ubicacion_mapa %}
 
 {% block title %}Nuevo Vecino - Junta de Vecinos{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto">
+<div class="max-w-3xl mx-auto">
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Agregar Nuevo Vecino</h1>
         <p class="text-gray-600 dark:text-slate-300 mt-2">Completa la información del nuevo vecino del cuadrante</p>
@@ -68,6 +69,12 @@
                        placeholder="Ingresa la dirección completa">
             </div>
 
+            {{ vecino_ubicacion_mapa(
+                map_config,
+                form_data.latitud if form_data and form_data.latitud else '',
+                form_data.longitud if form_data and form_data.longitud else ''
+            ) }}
+
             <div>
                 <label for="notas" class="block text-sm font-medium text-gray-700 mb-2">
                     Notas Adicionales
@@ -99,7 +106,7 @@
             </div>
             <div class="ml-3">
                 <p class="text-sm text-blue-700 dark:text-slate-200">
-                    Los campos marcados con * son obligatorios. El RUT será validado automáticamente.
+                    Los campos marcados con * son obligatorios. Usa «Obtener Coordenadas» o «Seleccionar en el Mapa» para que el vecino aparezca en el mapa del sector.
                 </p>
             </div>
         </div>

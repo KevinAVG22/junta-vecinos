@@ -1,0 +1,189 @@
+{% macro vecino_ubicacion_mapa(map_config, lat='', lng='') %}
+<div class="border-t border-gray-200 dark:border-slate-700 pt-6 mt-2">
+    <h3 class="text-base font-semibold text-gray-900 dark:text-slate-100 flex items-center gap-2 mb-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        Ubicación en el Mapa
+    </h3>
+    <p class="text-sm text-gray-600 dark:text-slate-400 mb-4">
+        Agrega las coordenadas para mostrar este vecino en el mapa interactivo (opcional)
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+            <label for="latitud" class="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Latitud</label>
+            <input type="text" id="latitud" name="latitud" inputmode="decimal"
+                   value="{{ lat if lat is not none and lat != '' else '' }}"
+                   class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100"
+                   placeholder="Ej: -33.4143">
+            <p class="text-xs text-gray-500 dark:text-slate-400 mt-1">Coordenada de latitud (ej: -33.4143)</p>
+        </div>
+        <div>
+            <label for="longitud" class="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Longitud</label>
+            <input type="text" id="longitud" name="longitud" inputmode="decimal"
+                   value="{{ lng if lng is not none and lng != '' else '' }}"
+                   class="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100"
+                   placeholder="Ej: -70.5370">
+            <p class="text-xs text-gray-500 dark:text-slate-400 mt-1">Coordenada de longitud (ej: -70.5370)</p>
+        </div>
+    </div>
+
+    <div class="mt-4 flex flex-col sm:flex-row gap-3">
+        <button type="button" id="btn-geocodificar-auto"
+                class="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300 text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            Obtener Coordenadas Automáticamente
+        </button>
+        <button type="button" id="btn-seleccionar-mapa"
+                class="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300 text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+            Seleccionar en el Mapa
+        </button>
+    </div>
+    <p class="text-xs text-gray-500 dark:text-slate-400 mt-2">
+        Opción 1: Obtén coordenadas automáticamente por dirección · Opción 2: Selecciona la ubicación exacta en el mapa interactivo
+    </p>
+    <div id="ubicacion-feedback" class="text-sm mt-2 hidden"></div>
+</div>
+
+<div id="pickerMapModal" class="fixed inset-0 z-[120] hidden" aria-hidden="true">
+    <div class="absolute inset-0 bg-black/60" data-picker-close="1"></div>
+    <div class="absolute inset-0 p-4 flex items-center justify-center">
+        <div class="w-full max-w-4xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-2xl overflow-hidden">
+            <div class="px-4 py-3 flex items-center justify-between border-b border-gray-200 dark:border-slate-800">
+                <div class="text-sm font-semibold text-gray-900 dark:text-slate-100">Seleccionar ubicación en el mapa</div>
+                <button type="button" id="pickerMapClose" class="text-sm bg-gray-200 hover:bg-gray-300 dark:bg-slate-800 dark:hover:bg-slate-700 px-3 py-2 rounded-md">Cerrar</button>
+            </div>
+            <div class="px-4 py-2 text-xs text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-800">
+                Haz clic en el mapa para marcar la ubicación exacta del vecino dentro del cuadrante.
+            </div>
+            <div id="picker-map" class="w-full bg-slate-100 dark:bg-slate-950" style="height: min(60vh, 520px);"></div>
+            <div class="px-4 py-3 flex justify-end gap-2 border-t border-gray-200 dark:border-slate-800">
+                <button type="button" id="pickerMapConfirm" class="bg-primary hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Usar esta ubicación</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(function() {
+    const MAP_CONFIG = {{ map_config | tojson }};
+    const QUADRANTE_BOUNDS = [
+        [MAP_CONFIG.bounds.south, MAP_CONFIG.bounds.west],
+        [MAP_CONFIG.bounds.north, MAP_CONFIG.bounds.east],
+    ];
+    const latInput = document.getElementById('latitud');
+    const lngInput = document.getElementById('longitud');
+    const domicilioInput = document.getElementById('domicilio');
+    const feedback = document.getElementById('ubicacion-feedback');
+    const modal = document.getElementById('pickerMapModal');
+
+    let pickerMap = null;
+    let pickerMarker = null;
+    let pickedLatLng = null;
+
+    function showFeedback(msg, ok) {
+        feedback.textContent = msg;
+        feedback.className = 'text-sm mt-2 ' + (ok ? 'text-green-600 dark:text-green-400' : 'text-amber-700 dark:text-amber-300');
+        feedback.classList.remove('hidden');
+    }
+
+    function setCoords(lat, lng, msg, ok) {
+        latInput.value = Number(lat).toFixed(6);
+        lngInput.value = Number(lng).toFixed(6);
+        if (msg) showFeedback(msg, ok);
+    }
+
+    document.getElementById('btn-geocodificar-auto').addEventListener('click', async function() {
+        const domicilio = (domicilioInput && domicilioInput.value || '').trim();
+        if (!domicilio) {
+            showFeedback('Primero ingresa el domicilio del vecino.', false);
+            return;
+        }
+        showFeedback('Buscando coordenadas…', true);
+        try {
+            const res = await fetch('{{ url_for("api_geocodificar_domicilio") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ domicilio: domicilio }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const extra = data.sugerencia ? ' ' + data.sugerencia : '';
+                showFeedback((data.error || 'No se encontraron coordenadas para esa dirección.') + extra, false);
+                return;
+            }
+            let msg = data.en_cuadrante
+                ? 'Coordenadas obtenidas correctamente dentro del cuadrante.'
+                : 'Coordenadas obtenidas. Revisa que queden dentro del cuadrante del sector.';
+            if (data.aviso) msg = data.aviso;
+            setCoords(data.lat, data.lng, msg, data.en_cuadrante);
+        } catch (e) {
+            showFeedback('No se pudo conectar con el servicio de geocodificación. Usa «Seleccionar en el Mapa».', false);
+        }
+    });
+
+    function initPickerMap() {
+        if (pickerMap) {
+            pickerMap.invalidateSize();
+            return;
+        }
+        const center = [MAP_CONFIG.center.lat, MAP_CONFIG.center.lng];
+        pickerMap = L.map('picker-map', { maxBounds: QUADRANTE_BOUNDS, maxBoundsViscosity: 0.9 }).setView(center, 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap',
+        }).addTo(pickerMap);
+        const ring = MAP_CONFIG.cuadrante.map(function(p) { return [p.lat, p.lng]; });
+        L.polygon(ring, { color: '#059669', weight: 2, fillOpacity: 0.06, dashArray: '6 4' }).addTo(pickerMap);
+        pickerMap.fitBounds(QUADRANTE_BOUNDS, { padding: [20, 20] });
+
+        pickerMap.on('click', function(e) {
+            pickedLatLng = e.latlng;
+            if (pickerMarker) pickerMarker.setLatLng(e.latlng);
+            else pickerMarker = L.marker(e.latlng).addTo(pickerMap);
+        });
+    }
+
+    function openPicker() {
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        setTimeout(function() {
+            initPickerMap();
+            const lat = parseFloat(String(latInput.value).replace(',', '.'));
+            const lng = parseFloat(String(lngInput.value).replace(',', '.'));
+            if (!isNaN(lat) && !isNaN(lng)) {
+                pickedLatLng = L.latLng(lat, lng);
+                if (pickerMarker) pickerMarker.setLatLng(pickedLatLng);
+                else pickerMarker = L.marker(pickedLatLng).addTo(pickerMap);
+                pickerMap.setView(pickedLatLng, 17);
+            }
+        }, 120);
+    }
+
+    function closePicker() {
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    document.getElementById('btn-seleccionar-mapa').addEventListener('click', openPicker);
+    document.getElementById('pickerMapClose').addEventListener('click', closePicker);
+    modal.addEventListener('click', function(e) {
+        if (e.target && e.target.getAttribute && e.target.getAttribute('data-picker-close') === '1') closePicker();
+    });
+    document.getElementById('pickerMapConfirm').addEventListener('click', function() {
+        if (!pickedLatLng) {
+            showFeedback('Haz clic en el mapa para elegir una ubicación.', false);
+            return;
+        }
+        setCoords(pickedLatLng.lat, pickedLatLng.lng, 'Ubicación seleccionada manualmente en el mapa.', true);
+        closePicker();
+    });
+})();
+</script>
+{% endmacro %}
