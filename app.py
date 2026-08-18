@@ -524,6 +524,53 @@ def mi_cuenta():
 
     return render_template('mi_cuenta.html')
 
+
+def _calcular_edad(fecha_nacimiento, referencia=None):
+    if not fecha_nacimiento:
+        return None
+    hoy = referencia or datetime.date.today()
+    edad = hoy.year - fecha_nacimiento.year
+    if (hoy.month, hoy.day) < (fecha_nacimiento.month, fecha_nacimiento.day):
+        edad -= 1
+    return edad
+
+
+def _rango_etario(edad):
+    if edad is None:
+        return 'Sin dato'
+    if edad < 18:
+        return '0-17'
+    if edad < 30:
+        return '18-29'
+    if edad < 45:
+        return '30-44'
+    if edad < 60:
+        return '45-59'
+    if edad < 75:
+        return '60-74'
+    return '75+'
+
+
+def _parse_fecha_nacimiento(value):
+    raw = (value or '').strip()
+    if not raw:
+        return None, None
+    fecha = _parse_date_flexible(raw)
+    if fecha is None:
+        return None, 'Formato de fecha de nacimiento inválido.'
+    if fecha > datetime.date.today():
+        return None, 'La fecha de nacimiento no puede ser futura.'
+    return fecha, None
+
+
+def _stats_rangos_etarios(vecinos):
+    orden = ('0-17', '18-29', '30-44', '45-59', '60-74', '75+', 'Sin dato')
+    conteo = {r: 0 for r in orden}
+    for vecino in vecinos:
+        conteo[_rango_etario(_calcular_edad(vecino.fecha_nacimiento))] += 1
+    return [(r, conteo[r]) for r in orden if conteo[r] > 0]
+
+
 class Vecino(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(100), nullable=False)
@@ -531,6 +578,7 @@ class Vecino(db.Model):
     telefono = db.Column(db.String(20))
     domicilio = db.Column(db.String(200), nullable=False)
     rut = db.Column(db.String(20), unique=True, nullable=False)
+    fecha_nacimiento = db.Column(db.Date, nullable=True)
     fecha_registro = db.Column(db.DateTime, default=db.func.current_timestamp())
     notas = db.Column(db.Text)
     activo = db.Column(db.Boolean, default=True)
@@ -539,6 +587,14 @@ class Vecino(db.Model):
     geocodificado_en = db.Column(db.DateTime, nullable=True)
     geocodificacion_error = db.Column(db.String(255), nullable=True)
     domicilio_mapeado = db.Column(db.String(200), nullable=True)
+
+    @property
+    def edad(self):
+        return _calcular_edad(self.fecha_nacimiento)
+
+    @property
+    def rango_etario(self):
+        return _rango_etario(self.edad)
 
 
 def _normalize_domicilio_key(domicilio):
@@ -957,6 +1013,7 @@ def _form_vecino_desde_request():
         'telefono': request.form['telefono'].strip(),
         'domicilio': request.form['domicilio'].strip(),
         'rut': request.form['rut'].strip(),
+        'fecha_nacimiento': request.form.get('fecha_nacimiento', '').strip(),
         'notas': request.form['notas'].strip(),
         'latitud': request.form.get('latitud', '').strip(),
         'longitud': request.form.get('longitud', '').strip(),
@@ -1153,6 +1210,147 @@ def _apply_vecino_search(query, q):
     return query.filter(db.or_(*conditions))
 
 
+class SimplePagination:
+    def __init__(self, page, per_page, total):
+        self.page = max(1, page or 1)
+        self.per_page = per_page
+        self.total = total
+        self.pages = max(1, (total + per_page - 1) // per_page) if total else 1
+        if self.page > self.pages:
+            self.page = self.pages
+        self.has_prev = self.page > 1
+        self.has_next = self.page < self.pages
+        self.prev_num = self.page - 1 if self.has_prev else None
+        self.next_num = self.page + 1 if self.has_next else None
+        self.items = []
+
+    def iter_pages(self, left_edge=1, left_current=2, right_current=2, right_edge=1):
+        last = 0
+        for num in range(1, self.pages + 1):
+            if (
+                num <= left_edge
+                or (
+                    num > self.page - left_current - 1
+                    and num < self.page + right_current
+                )
+                or num > self.pages - right_edge
+            ):
+                if last + 1 != num:
+                    yield None
+                yield num
+                last = num
+
+
+def _paginate_list(items, page, per_page):
+    pagination = SimplePagination(page, per_page, len(items))
+    start = (pagination.page - 1) * per_page
+    pagination.items = items[start:start + per_page]
+    return pagination
+
+
+def _agrupar_vecinos_por_casa(vecinos):
+    grupos = {}
+    for vecino in vecinos:
+        domicilio = (vecino.domicilio or '').strip()
+        key = _normalize_domicilio_key(domicilio)
+        if not key:
+            continue
+        if key not in grupos:
+            grupos[key] = {
+                'domicilio_key': key,
+                'domicilio': domicilio,
+                'integrantes': [],
+            }
+        grupos[key]['integrantes'].append(vecino)
+
+    casas = []
+    for grupo in grupos.values():
+        grupo['integrantes'].sort(key=lambda v: (v.apellidos.lower(), v.nombre.lower()))
+        domicilios = [(v.domicilio or '').strip() for v in grupo['integrantes']]
+        grupo['domicilio'] = max(set(domicilios), key=domicilios.count)
+        calle, numero = _extraer_calle_numero(grupo['domicilio'])
+        grupo['calle'] = calle or ''
+        grupo['numero'] = numero or ''
+        grupo['count'] = len(grupo['integrantes'])
+        grupo['con_ubicacion'] = any(_tiene_ubicacion_mapa(v) for v in grupo['integrantes'])
+        grupo['tipo'] = 'Individual' if grupo['count'] == 1 else 'Compartida'
+        casas.append(grupo)
+    return casas
+
+
+def _casa_coincide_busqueda(casa, q):
+    if not q:
+        return True
+    if _matches_term(casa['domicilio'], q):
+        return True
+    if _matches_term(casa['calle'], q):
+        return True
+    for vecino in casa['integrantes']:
+        if _matches_term(f"{vecino.nombre} {vecino.apellidos}", q):
+            return True
+        if _matches_term(vecino.rut, q):
+            return True
+    return False
+
+
+def _matches_term(text, term):
+    if not term or text is None:
+        return False
+    s = str(text)
+    t = str(term).strip()
+    if not t:
+        return False
+    if t.lower() in s.lower():
+        return True
+    return _normalize_search_text(t) in _normalize_search_text(s)
+
+
+def _filtrar_casas(casas, q=''):
+    if not q:
+        return casas
+    return [casa for casa in casas if _casa_coincide_busqueda(casa, q)]
+
+
+def _ordenar_casas(casas, sort_by, sort_order):
+    reverse = sort_order == 'desc'
+
+    def sort_key(casa):
+        if sort_by == 'integrantes':
+            return casa['count']
+        if sort_by == 'tipo':
+            return (0 if casa['count'] == 1 else 1, casa['domicilio'].lower())
+        if sort_by == 'mapa':
+            return (1 if casa['con_ubicacion'] else 0, casa['domicilio'].lower())
+        return casa['domicilio'].lower()
+
+    return sorted(casas, key=sort_key, reverse=reverse)
+
+
+def _stats_casas(casas):
+    if not casas:
+        return {
+            'total_casas': 0,
+            'total_integrantes': 0,
+            'promedio_integrantes': 0,
+            'max_integrantes': 0,
+            'casa_mas_habitada': '',
+            'casas_un_integrante': 0,
+            'casas_multiples': 0,
+        }
+    total_integrantes = sum(c['count'] for c in casas)
+    total_casas = len(casas)
+    max_casa = max(casas, key=lambda c: c['count'])
+    return {
+        'total_casas': total_casas,
+        'total_integrantes': total_integrantes,
+        'promedio_integrantes': round(total_integrantes / total_casas, 1),
+        'max_integrantes': max_casa['count'],
+        'casa_mas_habitada': max_casa['domicilio'],
+        'casas_un_integrante': sum(1 for c in casas if c['count'] == 1),
+        'casas_multiples': sum(1 for c in casas if c['count'] > 1),
+    }
+
+
 class RegistroAccion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
@@ -1257,6 +1455,7 @@ def dashboard():
         'rut': Vecino.rut,
         'domicilio': Vecino.domicilio,
         'telefono': Vecino.telefono,
+        'fecha_nacimiento': Vecino.fecha_nacimiento,
         'fecha_registro': Vecino.fecha_registro,
     }.get(sort_by, Vecino.nombre)
     query = _order_by_col(query, sort_col, sort_order)
@@ -1273,6 +1472,9 @@ def dashboard():
         'sort_by': sort_by,
         'sort_order': sort_order,
     }
+    todos_vecinos = Vecino.query.filter_by(activo=True).all()
+    rangos_etarios = _stats_rangos_etarios(todos_vecinos)
+    vecinos_con_edad = sum(1 for v in todos_vecinos if v.fecha_nacimiento)
 
     return render_template(
         'dashboard.html',
@@ -1286,6 +1488,48 @@ def dashboard():
         has_filters=has_filters,
         page_params=page_params,
         certificados_por_vecino=certificados_por_vecino,
+        rangos_etarios=rangos_etarios,
+        vecinos_con_edad=vecinos_con_edad,
+    )
+
+
+@app.route('/casas')
+@login_required
+def casas_sector():
+    q = _arg('q')
+    sort_by = request.args.get('sort_by', 'domicilio')
+    sort_order = request.args.get('sort_order', 'asc')
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+
+    vecinos = Vecino.query.filter_by(activo=True).order_by(Vecino.domicilio.asc()).all()
+    todas_casas = _agrupar_vecinos_por_casa(vecinos)
+    stats_totales = _stats_casas(todas_casas)
+
+    casas = _filtrar_casas(todas_casas, q=q)
+    casas = _ordenar_casas(casas, sort_by, sort_order)
+    stats_filtradas = _stats_casas(casas)
+
+    pagination = _paginate_list(casas, page, per_page)
+    has_filters = bool(q)
+    page_params = {
+        'q': q,
+        'sort_by': sort_by,
+        'sort_order': sort_order,
+    }
+
+    return render_template(
+        'casas.html',
+        casas=pagination.items,
+        pagination=pagination,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        q=q,
+        has_filters=has_filters,
+        page_params=page_params,
+        stats_totales=stats_totales,
+        stats_filtradas=stats_filtradas,
+        casas_filtradas=len(casas),
     )
 
 
@@ -1329,6 +1573,24 @@ def api_mapa_datos():
         'marcadores': marcadores,
         'sin_ubicacion': sin_ubicacion,
         'status': 'ok' if marcadores or not sin_ubicacion else 'sin_datos',
+    })
+
+
+@app.route('/api/mapa/referencias-picker')
+@login_required
+def api_mapa_referencias_picker():
+    """Domicilios ya ubicados en el mapa, para mostrar al seleccionar pin manual."""
+    excluir_id = request.args.get('excluir_id', type=int)
+    vecinos = Vecino.query.filter_by(activo=True).all()
+    if excluir_id:
+        vecinos = [v for v in vecinos if v.id != excluir_id]
+    marcadores = _marcadores_mapa_desde_vecinos(vecinos)
+    return jsonify({
+        'marcadores': [{
+            'domicilio': m['domicilio'],
+            'lat': m['lat'],
+            'lng': m['lng'],
+        } for m in marcadores if m.get('lat') is not None and m.get('lng') is not None],
     })
 
 
@@ -1396,7 +1658,10 @@ def exportar_excel():
     ws = wb.active
     ws.title = 'Vecinos'
     # Encabezados
-    ws.append(['#', 'Nombre', 'Apellidos', 'RUT', 'Domicilio', 'Teléfono', 'Fecha Registro', 'Notas'])
+    ws.append([
+        '#', 'Nombre', 'Apellidos', 'RUT', 'Fecha Nacimiento', 'Edad',
+        'Rango Etario', 'Domicilio', 'Teléfono', 'Fecha Registro', 'Notas',
+    ])
     # Datos
     for idx, v in enumerate(vecinos, 1):
         ws.append([
@@ -1404,6 +1669,9 @@ def exportar_excel():
             v.nombre,
             v.apellidos,
             v.rut,
+            v.fecha_nacimiento.strftime('%d/%m/%Y') if v.fecha_nacimiento else '',
+            v.edad if v.edad is not None else '',
+            v.rango_etario,
             v.domicilio,
             v.telefono or '',
             v.fecha_registro.strftime('%d/%m/%Y'),
@@ -2269,11 +2537,15 @@ def nuevo_vecino():
         form_data['rut'] = rut
         if not es_valido:
             flash(f'Error en RUT: {mensaje_error}', 'error')
-            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config())
+            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config(), today=datetime.date.today().isoformat())
         existe, vecino_existente = rut_existe(rut)
         if existe:
             flash(f'El RUT ya está registrado por {vecino_existente.nombre} {vecino_existente.apellidos}', 'error')
-            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config())
+            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config(), today=datetime.date.today().isoformat())
+        fecha_nacimiento, err_fecha = _parse_fecha_nacimiento(form_data['fecha_nacimiento'])
+        if err_fecha:
+            flash(err_fecha, 'error')
+            return render_template('nuevo_vecino.html', form_data=form_data, map_config=_map_config(), today=datetime.date.today().isoformat())
         rut_formateado = formatear_rut(rut)
         vecino = Vecino(
             nombre=form_data['nombre'],
@@ -2281,6 +2553,7 @@ def nuevo_vecino():
             telefono=form_data['telefono'],
             domicilio=form_data['domicilio'],
             rut=rut_formateado,
+            fecha_nacimiento=fecha_nacimiento,
             notas=form_data['notas']
         )
         db.session.add(vecino)
@@ -2304,7 +2577,7 @@ def nuevo_vecino():
         )
         flash('Vecino agregado exitosamente', 'success')
         return redirect(url_for('dashboard'))
-    return render_template('nuevo_vecino.html', form_data=None, map_config=_map_config())
+    return render_template('nuevo_vecino.html', form_data=None, map_config=_map_config(), today=datetime.date.today().isoformat())
 
 @app.route('/vecinos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -2339,11 +2612,15 @@ def editar_vecino(id):
         form_data['rut'] = rut
         if not es_valido:
             flash(f'Error en RUT: {mensaje_error}', 'error')
-            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config())
+            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config(), today=datetime.date.today().isoformat())
         existe, vecino_existente = rut_existe(rut, vecino.id)
         if existe:
             flash(f'El RUT ya está registrado por {vecino_existente.nombre} {vecino_existente.apellidos}', 'error')
-            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config())
+            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config(), today=datetime.date.today().isoformat())
+        fecha_nacimiento, err_fecha = _parse_fecha_nacimiento(form_data['fecha_nacimiento'])
+        if err_fecha:
+            flash(err_fecha, 'error')
+            return render_template('editar_vecino.html', vecino=vecino, form_data=form_data, map_config=_map_config(), today=datetime.date.today().isoformat())
         rut_formateado = formatear_rut(rut)
         cambios = []
         if vecino.nombre != form_data['nombre']:
@@ -2356,6 +2633,10 @@ def editar_vecino(id):
             cambios.append(f"Domicilio: '{vecino.domicilio}' → '{form_data['domicilio']}'")
         if vecino.rut != rut_formateado:
             cambios.append(f"RUT: '{vecino.rut}' → '{rut_formateado}'")
+        if vecino.fecha_nacimiento != fecha_nacimiento:
+            old_fn = vecino.fecha_nacimiento.isoformat() if vecino.fecha_nacimiento else '—'
+            new_fn = fecha_nacimiento.isoformat() if fecha_nacimiento else '—'
+            cambios.append(f"Fecha nacimiento: '{old_fn}' → '{new_fn}'")
         if vecino.notas != form_data['notas']:
             cambios.append(f"Notas: '{vecino.notas}' → '{form_data['notas']}'")
         domicilio_cambio = vecino.domicilio != form_data['domicilio']
@@ -2376,6 +2657,7 @@ def editar_vecino(id):
         vecino.telefono = form_data['telefono']
         vecino.domicilio = form_data['domicilio']
         vecino.rut = rut_formateado
+        vecino.fecha_nacimiento = fecha_nacimiento
         vecino.notas = form_data['notas']
         if coords_cambiaron:
             _aplicar_ubicacion_vecino(
@@ -2402,7 +2684,7 @@ def editar_vecino(id):
         )
         flash('Vecino actualizado exitosamente', 'success')
         return redirect(url_for('dashboard'))
-    return render_template('editar_vecino.html', vecino=vecino, form_data=None, map_config=_map_config())
+    return render_template('editar_vecino.html', vecino=vecino, form_data=None, map_config=_map_config(), today=datetime.date.today().isoformat())
 
 @app.route('/vecinos/<int:id>/eliminar')
 @login_required
@@ -2629,6 +2911,9 @@ def _ensure_db_schema():
                     db.session.execute(db.text(ddl))
                     db.session.commit()
                     cols.add(col_name)
+            if 'fecha_nacimiento' not in cols:
+                db.session.execute(db.text("ALTER TABLE vecino ADD COLUMN fecha_nacimiento DATE NULL"))
+                db.session.commit()
             db.session.execute(db.text(
                 "UPDATE vecino SET domicilio_mapeado = domicilio "
                 "WHERE activo = 1 AND latitud IS NOT NULL AND longitud IS NOT NULL "

@@ -42,6 +42,21 @@
                 <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">{{ vecino.domicilio }}</dd>
             </div>
             <div>
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Fecha de nacimiento</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">
+                    {% if vecino.fecha_nacimiento %}
+                        {{ vecino.fecha_nacimiento.strftime('%d/%m/%Y') }}
+                        <span class="text-gray-500 dark:text-slate-400">({{ vecino.edad }} años)</span>
+                    {% else %}
+                        <span class="text-gray-400 dark:text-slate-500">No registrada</span>
+                    {% endif %}
+                </dd>
+            </div>
+            <div>
+                <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Rango etario</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">{{ vecino.rango_etario }}</dd>
+            </div>
+            <div>
                 <dt class="text-sm font-medium text-gray-500 dark:text-slate-400">Fecha de registro</dt>
                 <dd class="mt-1 text-sm text-gray-900 dark:text-slate-100">{{ vecino.fecha_registro.strftime('%d/%m/%Y') }}</dd>
             </div>

@@ -1,0 +1,67 @@
+{% macro casa_collapse_panel(casa) %}
+<div class="casa-detail-panel px-5 py-5 bg-gradient-to-b from-slate-50 to-white dark:from-slate-950/80 dark:to-slate-900 border-t border-gray-200 dark:border-slate-800"
+     onclick="event.stopPropagation()">
+
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5 pb-4 border-b border-gray-200/80 dark:border-slate-700/80">
+        <div class="min-w-0">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-slate-100">{{ casa.domicilio }}</h3>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+                {% if casa.calle %}
+                <span class="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200">
+                    {{ casa.calle }}{% if casa.numero %} {{ casa.numero }}{% endif %}
+                </span>
+                {% endif %}
+                <span class="inline-flex items-center rounded-full bg-primary/10 dark:bg-emerald-900/30 px-2.5 py-0.5 text-xs font-medium text-primary dark:text-emerald-400">
+                    {{ casa.count }} integrante{{ 's' if casa.count != 1 else '' }}
+                </span>
+                {% if casa.con_ubicacion %}
+                <span class="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
+                    Con ubicación en mapa
+                </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 shadow-sm">
+        <div class="px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-950/40">
+            <h4 class="text-sm font-semibold text-gray-800 dark:text-slate-200">Integrantes del domicilio</h4>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-100 dark:divide-slate-800 text-sm">
+                <thead class="bg-gray-50/80 dark:bg-slate-950/50">
+                    <tr>
+                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Nombre</th>
+                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Apellidos</th>
+                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">RUT</th>
+                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Edad</th>
+                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Teléfono</th>
+                        <th scope="col" class="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Acción</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900/40">
+                    {% for vecino in casa.integrantes %}
+                    <tr class="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td class="px-3 py-2.5 whitespace-nowrap font-medium text-gray-900 dark:text-slate-100">{{ vecino.nombre }}</td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-gray-700 dark:text-slate-200">{{ vecino.apellidos }}</td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-gray-600 dark:text-slate-300">{{ vecino.rut }}</td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-gray-600 dark:text-slate-300">
+                            {% if vecino.edad is not none %}{{ vecino.edad }} años{% else %}—{% endif %}
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-gray-600 dark:text-slate-300">
+                            {% if vecino.telefono %}{{ vecino.telefono }}{% else %}—{% endif %}
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-right">
+                            <a href="{{ url_for('editar_vecino', id=vecino.id) }}"
+                               class="inline-flex items-center rounded-md bg-blue-100 hover:bg-blue-200 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 transition-colors">
+                                Editar
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endmacro %}

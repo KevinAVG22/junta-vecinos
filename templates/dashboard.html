@@ -47,6 +47,28 @@
     </div>
 </div>
 
+{% if rangos_etarios %}
+<div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800 mb-6">
+    <div class="px-4 py-3 border-b border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-950/80">
+        <h2 class="text-sm font-semibold text-gray-800 dark:text-slate-200">Rangos etarios</h2>
+        <p class="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+            {{ vecinos_con_edad }} de {{ total_vecinos }} vecinos con fecha de nacimiento registrada
+        </p>
+    </div>
+    <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+        {% for rango, cantidad in rangos_etarios %}
+        <div class="rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-950/50 px-3 py-3 text-center">
+            <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-slate-400">{{ rango }}{% if rango != 'Sin dato' %} años{% endif %}</p>
+            <p class="text-xl font-bold text-gray-900 dark:text-slate-100 mt-1">{{ cantidad }}</p>
+            {% if total_vecinos > 0 %}
+            <p class="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{{ ((cantidad / total_vecinos) * 100)|round(1) }}%</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {% if total_vecinos > 0 or q %}
 <div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
     <form method="GET" action="{{ url_for('dashboard') }}" data-dt-form>
@@ -79,6 +101,8 @@
                         {{ th_label('RUT', true, 'rut', sort_by, sort_order) }}
                         {{ th_label('Domicilio', true, 'domicilio', sort_by, sort_order) }}
                         {{ th_label('Teléfono', true, 'telefono', sort_by, sort_order) }}
+                        {{ th_label('F. Nacimiento', true, 'fecha_nacimiento', sort_by, sort_order) }}
+                        {{ th_label('Edad') }}
                         {{ th_label('Fecha Registro', true, 'fecha_registro', sort_by, sort_order) }}
                         {{ th_label('Acciones') }}
                     </tr>
@@ -105,17 +129,38 @@
                         {{ dt_cell(vecino.domicilio, q) }}
                         {{ dt_cell(vecino.telefono if vecino.telefono else '—', q) }}
                         <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                            {% if vecino.fecha_nacimiento %}
+                                {{ vecino.fecha_nacimiento.strftime('%d/%m/%Y') }}
+                            {% else %}
+                                <span class="text-gray-400 dark:text-slate-500">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                            {% if vecino.edad is not none %}
+                                {{ vecino.edad }} años
+                            {% else %}
+                                <span class="text-gray-400 dark:text-slate-500">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
                             {{ vecino.fecha_registro.strftime('%d/%m/%Y') }}
                         </td>
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium" onclick="event.stopPropagation()">
-                            <a href="{{ url_for('editar_vecino', id=vecino.id) }}"
-                               class="text-blue-600 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-xs">
-                                Editar
-                            </a>
+                            <div class="flex flex-wrap gap-2">
+                                <a href="{{ url_for('editar_vecino', id=vecino.id) }}"
+                                   class="text-blue-600 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-xs">
+                                    Editar
+                                </a>
+                                <a href="{{ url_for('eliminar_vecino', id=vecino.id) }}"
+                                   class="btn-eliminar-vecino text-red-600 hover:text-red-900 bg-red-100 hover:bg-red-200 px-2 py-1 rounded text-xs"
+                                   data-confirm="{{ ('¿Eliminar definitivamente a ' ~ vecino.nombre ~ ' ' ~ vecino.apellidos ~ ' (' ~ vecino.rut ~ ')? Esta acción no se puede deshacer.')|e }}">
+                                    Eliminar
+                                </a>
+                            </div>
                         </td>
                     </tr>
                     <tr id="vecino-detail-{{ vecino.id }}" class="vecino-detail-row hidden" aria-hidden="true">
-                        <td colspan="8" class="p-0">
+                        <td colspan="10" class="p-0">
                             {{ vecino_collapse_panel(vecino, certificados_por_vecino.get(vecino.id, [])) }}
                         </td>
                     </tr>
@@ -236,6 +281,18 @@
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 toggleRow(row);
+            }
+        });
+    });
+
+    document.querySelectorAll('.btn-eliminar-vecino').forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const msg = link.getAttribute('data-confirm')
+                || '¿Eliminar definitivamente a este vecino? Esta acción no se puede deshacer.';
+            if (window.confirm(msg)) {
+                window.location.href = link.getAttribute('href');
             }
         });
     });

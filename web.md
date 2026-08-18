@@ -4,11 +4,13 @@ Este documento describe **de forma explícita** la aplicación web contenida en 
 
 ## 1) ¿Qué es esta web?
 
-Aplicación web para **gestión comunitaria** (Junta de Vecinos) construida con **Python + Flask**, con persistencia en **MySQL** (típicamente vía XAMPP) y UI con **Tailwind CSS**.
+Aplicación web para **gestión comunitaria** de la **Junta De Vecino Colón Oriente** (Las Condes, Santiago, Chile), construida con **Python + Flask**, persistencia en **MySQL** (típicamente vía XAMPP) y UI con **Tailwind CSS**.
 
 Su objetivo es permitir, bajo inicio de sesión:
 
-- Administrar un **padrón/listado de vecinos** (crear, buscar, editar, eliminar, ver ficha).
+- Administrar un **padrón/listado de vecinos** (crear, buscar, editar, eliminar, ver ficha expandible).
+- Visualizar **ubicación geográfica** de vecinos en un **mapa interactivo del sector** (Leaflet + geocodificación).
+- Consultar **personas agrupadas por casa/domicilio**.
 - Emitir y gestionar **Certificados de Residencia**, con **vista previa** y **PDF generado** automáticamente.
 - Administrar un repositorio de **Documentos** subidos (archivos) organizados por **Tipos**.
 - (Solo administradores) Administrar **Usuarios y roles**, y consultar **Historial** (auditoría de movimientos/acciones).
@@ -20,11 +22,19 @@ Según `requirements.txt`:
 - **Flask**: servidor web y ruteo.
 - **Flask-SQLAlchemy**: ORM y conexión a MySQL.
 - **Flask-Login**: sesiones, login/logout, protección de rutas.
+- **Flask-WTF / WTForms**: formularios (dependencias declaradas).
 - **PyMySQL**: driver MySQL.
-- **python-dotenv**: carga de `.env` para `SECRET_KEY`.
+- **python-dotenv**: carga de `.env` para `SECRET_KEY` y variables del mapa.
 - **Werkzeug**: hashing de contraseñas y utilidades.
 - **openpyxl**: exportación de vecinos a Excel (`.xlsx`).
 - **playwright**: generación de PDF (Chromium headless) desde HTML.
+- **reportlab / pillow / charset-normalizer**: dependencias auxiliares del ecosistema PDF/imágenes.
+
+**Frontend (CDN, sin build step):**
+
+- **Tailwind CSS** (modo claro/oscuro con clase `dark`).
+- **Leaflet 1.9.4** + **Leaflet.markercluster** (mapa del sector y picker de ubicación).
+- **OpenStreetMap** (tiles del mapa).
 
 ## 3) Configuración y ejecución
 
@@ -42,22 +52,38 @@ En `app.py`:
   - Carpeta: `uploads/` en el raíz de la app (se crea automáticamente si no existe).
   - Límite de tamaño: **16MB** por request (`MAX_CONTENT_LENGTH`).
 
-### 3.2 Primer arranque (migraciones simples y usuario admin)
+### 3.2 Variables de entorno del mapa (opcionales)
 
-Al ejecutar `python app.py`, en el bloque `if __name__ == '__main__':`:
+Configurables en `.env` (valores por defecto orientados al cuadrante Colón Oriente):
 
-- Se ejecuta `db.create_all()` (crea tablas si no existen).
-- Se intentan **migraciones simples** (ALTER TABLE) para asegurar columnas:
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `MAP_SECTOR_CONTEXT` | Contexto textual del sector | `Colón Oriente, Las Condes, Santiago, Chile` |
+| `MAP_CENTER_LAT` / `MAP_CENTER_LNG` | Centro del mapa | `-33.4143` / `-70.5370` |
+| `MAP_BOUNDS_NORTH/SOUTH/WEST/EAST` | Límites del cuadrante | ver `app.py` |
+| Cuadrante de calles | Cristóbal Colón, Padre Hurtado Sur, Río Guadiana y Paul Harris | constante en código |
+
+### 3.3 Primer arranque (migraciones simples y usuario admin)
+
+Al iniciar la app, `@app.before_request` ejecuta `_ensure_db_schema()` una sola vez:
+
+- `db.create_all()` (crea tablas si no existen).
+- **Migraciones simples** (ALTER TABLE) para asegurar columnas:
   - `usuario.role`
   - `vecino.activo`
+  - `vecino.fecha_nacimiento`
+  - `vecino.latitud`, `vecino.longitud`, `vecino.geocodificado_en`, `vecino.geocodificacion_error`, `vecino.domicilio_mapeado`
   - `certificado_residencia.pago`
   - `certificado_residencia.presentado_en`
   - `certificado_residencia.documento_id`
+- Backfill de `domicilio_mapeado` para vecinos ya geocodificados.
 - Se crea un **usuario administrador por defecto** si no existe:
   - **username**: `admin`
   - **password**: `admin123`
   - **email**: `admin@junta.com`
   - rol: `Admin`
+
+Al ejecutar `python app.py` directamente, el servidor corre en `http://0.0.0.0:5000` (accesible en LAN).
 
 ## 4) Navegación y layout (UI)
 
@@ -65,7 +91,7 @@ Al ejecutar `python app.py`, en el bloque `if __name__ == '__main__':`:
 
 Plantilla: `templates/base.html`
 
-- **Tailwind via CDN**.
+- **Tailwind via CDN** con color primario `#059669` (verde).
 - **Modo claro/oscuro**:
   - Botón “Claro / Oscuro” en header (usuarios autenticados) y navbar (no autenticados).
   - Persistencia en `localStorage` con clave `theme`.
@@ -73,22 +99,49 @@ Plantilla: `templates/base.html`
 - **Sidebar (autenticados)**:
   - Se puede colapsar/expandir.
   - Persistencia en `localStorage` con clave `sidebar` (`collapsed|expanded`).
-- **Flash messages**:
-  - Muestra mensajes de éxito/error/info con colores.
-- **Logo**:
-  - Se referencia `static/junta de vecinos.jpg`.
+  - Título: “Junta De Vecino Colon Oriente”.
+- **Flash messages**: mensajes de éxito/error/info con colores.
+- **Logo**: `static/junta de vecinos.jpg`.
+- **Resaltado de búsqueda**: estilos `mark.dt-highlight` y `td.dt-cell-match` para coincidencias en tablas.
 
 ### 4.2 Menú lateral (autenticados)
 
 En sesión aparecen accesos a:
 
 - **Dashboard (Vecinos)**: `/dashboard`
+- **Mapa del Sector**: `/mapa`
+- **Personas por Casa**: `/casas`
 - **Certificados de residencia**: `/certificados`
 - **Documentos**: `/documentos`
 - **Mi cuenta**: `/mi-cuenta`
 - (Solo Admin) **Historial**: `/registros`
 - (Solo Admin) **Usuarios**: `/usuarios`
 - **Cerrar sesión**: `/logout`
+
+### 4.3 Macros reutilizables de tablas
+
+Plantilla: `templates/macros/data_table.html`
+
+Macros compartidos por dashboard, casas, certificados, documentos, registros y usuarios:
+
+- `filter_input`, `sort_button`, `th_label`, `th_filter`, `dt_cell`
+- `table_toolbar`, `pagination_nav`, `table_filter_script`
+- Orden por clic en cabecera, búsqueda con auto-submit (debounce ~1 s), resaltado de términos.
+
+Otras macros:
+
+- `macros/vecino_detail.html` — panel expandible de vecino + certificados vinculados + eliminar.
+- `macros/casa_detail.html` — panel expandible de integrantes por casa.
+- `macros/vecino_ubicacion_mapa.html` — geocodificación y picker manual en formularios de vecino.
+- `macros/certificado_preview.html` — modal de vista previa de certificados.
+
+### 4.4 Filtros Jinja personalizados
+
+En `app.py`:
+
+- `highlight` — resalta coincidencias de búsqueda (incluye normalización de RUT).
+- `matches_term` — indica si un texto coincide con el término buscado.
+- `merge_dicts` — fusiona diccionarios en plantillas.
 
 ## 5) Roles y permisos
 
@@ -101,7 +154,7 @@ Reglas de permisos implementadas:
 
 - **Administración de usuarios**: solo Admin (`/usuarios`, crear usuario, cambiar rol, reset contraseña).
 - **Historial / auditoría**: solo Admin (`/registros`).
-- El resto de secciones (vecinos, certificados, documentos, mi cuenta) requieren estar autenticado, pero **no** restringen por rol (más allá de lo anterior).
+- El resto de secciones (vecinos, mapa, casas, certificados, documentos, mi cuenta) requieren estar autenticado, pero **no** restringen por rol (más allá de lo anterior).
 
 ## 6) Modelos / datos almacenados (tablas)
 
@@ -116,9 +169,7 @@ La base de datos contiene (ORM en `app.py`):
 - `es_admin` (boolean)
 - `role` (string, por defecto `Asistente`)
 
-**Contraseñas**:
-
-- Se almacenan hasheadas con Werkzeug (`generate_password_hash` / `check_password_hash`).
+**Contraseñas**: almacenadas hasheadas con Werkzeug.
 
 ### 6.2 `vecino` (modelo `Vecino`)
 
@@ -127,142 +178,147 @@ La base de datos contiene (ORM en `app.py`):
 - `apellidos` (string, requerido)
 - `telefono` (string, opcional)
 - `domicilio` (string, requerido)
-- `rut` (string, único, requerido) — se guarda **formateado**.
+- `rut` (string, único, requerido) — se guarda **formateado**
+- `fecha_nacimiento` (date, opcional)
 - `fecha_registro` (datetime, default timestamp)
 - `notas` (text, opcional)
-- `activo` (boolean, default true) — la UI trabaja con activos; el borrado actual es hard delete.
+- `activo` (boolean, default true)
+- `latitud`, `longitud` (float, opcionales) — coordenadas en el mapa
+- `geocodificado_en` (datetime, opcional) — última geocodificación
+- `geocodificacion_error` (string, opcional) — error o aviso (ej. fuera de cuadrante)
+- `domicilio_mapeado` (string, opcional) — domicilio normalizado usado al geocodificar
+
+**Propiedades calculadas (no persistidas):**
+
+- `edad` — años completos según `fecha_nacimiento` y fecha actual.
+- `rango_etario` — categoría: `0-17`, `18-29`, `30-44`, `45-59`, `60-74`, `75+`, `Sin dato`.
+
+**Nota sobre borrado**: la UI trabaja con activos; la ruta de eliminación hace **hard delete** definitivo.
 
 ### 6.3 `registro_accion` (modelo `RegistroAccion`)
 
-Registro “histórico viejo” asociado a vecinos:
+Registro histórico asociado a vecinos:
 
-- `id` (PK)
-- `usuario_id`, `usuario_nombre`
-- `vecino_id`
+- `id`, `usuario_id`, `usuario_nombre`, `vecino_id`
 - `accion` (`crear|editar|eliminar|ver`)
-- `fecha_hora`
-- `detalles`
+- `fecha_hora`, `detalles`
 
 ### 6.4 `registro_movimiento` (modelo `RegistroMovimiento`)
 
-Auditoría más general, usada para “Historial”:
+Auditoría general usada para “Historial”:
 
-- `id` (PK)
-- `usuario_id`, `usuario_nombre`
+- `id`, `usuario_id`, `usuario_nombre`
 - `entidad` (`vecino|certificado|documento|tipo_documento|usuario`)
 - `entidad_id`
 - `accion` (`crear|editar|eliminar|ver|descargar`)
-- `fecha_hora`
-- `detalles`
+- `fecha_hora`, `detalles`
 
 En la vista de historial se filtran movimientos “huérfanos” para no mostrar registros inconsistentes si se borró info directamente en MySQL (excepto acciones `eliminar`).
 
 ### 6.5 `certificado_residencia` (modelo `CertificadoResidencia`)
 
-- `id` (PK)
-- `fecha` (date, requerido)
-- `nombres` (string, requerido)
-- `apellidos` (string, requerido)
-- `rut` (string, requerido) — se valida y se guarda formateado.
-- `direccion` (string, requerido)
-- `presentado_en` (string, opcional en DB; requerido en formulario)
+- `id`, `fecha`, `nombres`, `apellidos`, `rut`, `direccion`
+- `presentado_en` (opcional en DB; requerido en formulario)
 - `pago` (boolean, default false)
-- `archivo_nombre`, `archivo_ruta` (strings) — presentes en el modelo, pero la vinculación real usa `documento_id`.
+- `archivo_nombre`, `archivo_ruta` — presentes en el modelo; la vinculación real usa `documento_id`
 - `documento_id` (int, referencia lógica al Documento generado)
-- `activo` (boolean, default true) — la UI lista activos; el borrado actual es hard delete.
-- `fecha_creacion` (datetime, default timestamp)
+- `activo` (boolean, default true)
+- `fecha_creacion` (datetime)
 
 ### 6.6 `documento` (modelo `Documento`)
 
-Representa un archivo subido o generado (PDF de certificado):
-
-- `id` (PK)
-- `nombre` (string, requerido)
-- `tipo` (string, requerido) — coincide con `DocumentoTipo.nombre`
-- `archivo_nombre` (string, requerido) — nombre original (sanitizado) del archivo
-- `archivo_ruta` (string, requerido) — ruta física en `uploads/`
-- `activo` (boolean, default true) — la UI lista activos; el borrado actual es hard delete.
-- `fecha_creacion` (datetime)
+- `id`, `nombre`, `tipo`, `archivo_nombre`, `archivo_ruta`
+- `activo`, `fecha_creacion`
 
 ### 6.7 `documento_tipo` (modelo `DocumentoTipo`)
 
-Catálogo de tipos:
-
-- `id` (PK)
-- `nombre` (string, único, requerido)
-- `activo` (boolean)
-- `fecha_creacion` (datetime)
-
-Existe un **tipo reservado**:
-
-- `Certificados de residencia`
-
-Este tipo se usa para guardar **automáticamente** los PDF generados desde certificados y se bloquea su eliminación desde la UI.
+Catálogo de tipos con nombre único. Tipo reservado: **Certificados de residencia** (PDFs generados automáticamente; no se puede eliminar desde la UI si tiene documentos o es el tipo reservado).
 
 ## 7) Validaciones y normalizaciones importantes
 
 ### 7.1 Validación de RUT chileno
 
-Función `validar_rut(rut)`:
-
-- Limpia puntos y guiones.
-- Verifica largo mínimo.
-- Separa número y dígito verificador (DV).
-- Calcula DV por módulo 11.
-- Devuelve `(True, None)` si es válido; si no, `(False, mensaje_error)`.
+Función `validar_rut(rut)`: limpia, verifica largo, calcula DV por módulo 11.
 
 ### 7.2 Formateo de RUT
 
-Función `formatear_rut(rut)`:
-
-- Limpia puntos y guiones.
-- Inserta puntos cada 3 dígitos y guión antes del DV.
-- Ejemplo conceptual: `12345678K` → `12.345.678-K`
+Función `formatear_rut(rut)`: inserta puntos y guión (ej. `12.345.678-K`).
 
 ### 7.3 Unicidad de RUT en vecinos
 
-Función `rut_existe(rut, excluir_id=None)`:
+Función `rut_existe(rut, excluir_id=None)`: compara RUT normalizado contra vecinos activos.
 
-- Compara RUT “limpio” (sin puntos/guión) contra vecinos activos.
-- Sirve para:
-  - **Crear vecino**: no permitir duplicados.
-  - **Editar vecino**: permite conservar el propio RUT (usando `excluir_id`).
+### 7.4 Fecha de nacimiento
 
-### 7.4 Tipos de archivo permitidos
+Función `_parse_fecha_nacimiento(value)`:
 
-- Para documentos genéricos (`_allowed_document_upload`):
-  - `.pdf`, `.png`, `.jpg`, `.jpeg`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.txt`
-- Vista previa en navegador (`_documento_permite_vista_previa`):
-  - Solo `.pdf`, `.png`, `.jpg`, `.jpeg`
+- Acepta `YYYY-MM-DD`, `DD-MM-YYYY` o `DD/MM/YYYY`.
+- Rechaza fechas futuras.
+- Campo opcional en formularios.
 
-## 8) Funcionalidades por módulo (pantallas y rutas)
+### 7.5 Normalización de domicilios (geocodificación)
 
-### 8.1 Página pública (sin sesión)
+Función `_normalizar_domicilio_geocodificacion(domicilio)`: corrige variantes comunes de calles del sector (Sierra Nevada, Río Guadiana, Paul Harris, Cristóbal Colón, etc.).
+
+Función `_normalize_domicilio_key(domicilio)`: clave para agrupar casas (elimina puntos, guiones y espacios, minúsculas).
+
+### 7.6 Cuadrante geográfico
+
+Función `_coords_dentro_cuadrante(lat, lng)`: valida que las coordenadas estén dentro de los límites configurados del sector.
+
+### 7.7 Tipos de archivo permitidos
+
+- Documentos genéricos: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.txt`
+- Vista previa inline: solo `.pdf`, `.png`, `.jpg`, `.jpeg`
+
+## 8) Geocodificación y mapa
+
+### 8.1 Servicios externos
+
+- **Nominatim** (OpenStreetMap): geocodificación principal con rate limit ~1.25 s entre consultas.
+- **Photon** (Komoot): geocodificación alternativa con rate limit ~0.35 s.
+
+User-Agent: `JuntaDeVecinosColonOriente/1.0 (Las Condes, Chile)`.
+
+### 8.2 Flujo de ubicación de vecinos
+
+Al crear/editar vecino:
+
+1. **Automático**: botón “Obtener Coordenadas Automáticamente” → `POST /api/geocodificar-domicilio`.
+2. **Manual**: botón “Seleccionar en el Mapa” → modal Leaflet con pins azules (domicilios existentes) y pin verde (selección). API `GET /api/mapa/referencias-picker` (soporta `excluir_id` al editar).
+3. Al confirmar pin existente (≤ 25 m), autocompleta el campo domicilio.
+4. Si cambia el domicilio sin coords manuales, se re-geocodifica al guardar.
+
+### 8.3 Sincronización masiva
+
+- `POST /api/mapa/geocodificar` — inicia hilo en segundo plano para geocodificar vecinos pendientes (`force=1` reintenta todos).
+- `GET /api/mapa/sincronizacion` — estado de progreso (`running`, `total`, `done`, `ok`, `fail`, `pendientes`).
+
+### 8.4 Agrupación de marcadores
+
+Vecinos con misma clave de domicilio + coordenadas redondeadas se agrupan en un solo pin con badge de cantidad.
+
+## 9) Funcionalidades por módulo (pantallas y rutas)
+
+### 9.1 Página pública (sin sesión)
 
 #### `GET /`
 
 - Renderiza `templates/index.html` (landing).
-- Desde `base.html` (no autenticados) hay navbar con:
-  - Enlace a login: `/login`
-  - Toggle tema claro/oscuro
+- Navbar con enlace a login y toggle de tema.
 
-### 8.2 Autenticación
+### 9.2 Autenticación
 
 #### `GET|POST /login`
 
-- Si ya estás autenticado, redirige a `/dashboard`.
-- En POST:
-  - Lee `username` y `password`.
-  - Busca usuario por `username`.
-  - Verifica password con hash.
-  - Si ok: inicia sesión (`login_user`) y redirige a dashboard.
-  - Si falla: muestra flash “Usuario o contraseña incorrectos”.
+- Redirige a `/dashboard` si ya hay sesión.
+- POST: valida username/password, inicia sesión con Flask-Login.
 
 #### `GET /logout`
 
-- Cierra sesión (`logout_user`) y redirige a `/`.
+- Cierra sesión y redirige a `/`.
 
-### 8.3 Dashboard de Vecinos (CRUD + búsqueda + exportación)
+### 9.3 Dashboard de Vecinos (CRUD + búsqueda + exportación + demografía)
 
 Pantalla: `templates/dashboard.html`
 
@@ -271,393 +327,298 @@ Pantalla: `templates/dashboard.html`
 Funcionalidades:
 
 - **Listado tabular** de vecinos activos con columnas:
-  - # (correlativo considerando paginación)
-  - Nombre, Apellidos, RUT, Domicilio, Teléfono, Fecha registro
-  - Acciones: Ver / Editar / Eliminar
-- **Búsqueda** (texto) por:
-  - nombre, apellidos, rut, domicilio
-- **Ordenamiento**:
-  - por `nombre`, `apellidos`, `rut`, `domicilio`, `fecha_registro`
-  - asc/desc
-- **Paginación**:
-  - 10 vecinos por página
-- **Estadísticas** visibles:
-  - Total vecinos (activos)
-  - Mostrando (resultado filtrado)
-  - Página actual / total páginas
-- **Acciones rápidas (header)**:
-  - “Exportar a Excel”
-  - “+ Agregar Vecino”
-  - (Solo Admin) “Historial”
-- **UX extra**:
-  - Auto-submit del buscador tras 1 segundo sin escribir.
-  - Auto-submit al cambiar filtros.
-  - Resaltado del término buscado en la tabla (con estilos distintos para modo oscuro).
+  - # (correlativo con paginación)
+  - Nombre, Apellidos, RUT, Domicilio, Teléfono
+  - **F. Nacimiento**, **Edad**
+  - Fecha registro
+  - Acciones: Editar / Eliminar
+- **Fila expandible**: clic en fila muestra panel con ficha completa, notas, rango etario, certificados vinculados por RUT y acciones.
+- **Búsqueda global** (`q`) por: nombre, apellidos, rut, domicilio, teléfono, notas (RUT también sin puntos/guión).
+- **Ordenamiento** por: `nombre`, `apellidos`, `rut`, `domicilio`, `telefono`, `fecha_nacimiento`, `fecha_registro` (asc/desc).
+- **Paginación**: 10 vecinos por página.
+- **Panel de rangos etarios**: conteo por categoría (`0-17` … `75+`, `Sin dato`) con porcentaje sobre el total.
+- **Estadísticas**: total vecinos, mostrando (filtrado), página actual.
+- **Acciones rápidas**: Exportar Excel, Agregar Vecino, (Admin) Historial.
+- **Eliminar**: botón con confirmación vía `data-confirm` + listener JS `.btn-eliminar-vecino` (evita problemas de comillas en `onclick`).
 
 #### `GET /exportar-excel`
 
-Genera un Excel `vecinos.xlsx` con hoja `Vecinos`.
+Genera `vecinos.xlsx` con columnas:
 
-- Encabezados:
-  - `#`, `Nombre`, `Apellidos`, `RUT`, `Domicilio`, `Teléfono`, `Fecha Registro`, `Notas`
-- Orden: por `Vecino.nombre ASC`
-- Fecha registro exportada como texto `dd/mm/YYYY`.
-- Se devuelve como descarga (`send_file` en memoria).
+- `#`, `Nombre`, `Apellidos`, `RUT`, `Fecha Nacimiento`, `Edad`, `Rango Etario`, `Domicilio`, `Teléfono`, `Fecha Registro`, `Notas`
+
+Orden: por nombre ASC. Fechas en formato `dd/mm/YYYY`.
 
 #### `GET|POST /vecinos/nuevo`
 
 Pantalla: `templates/nuevo_vecino.html`
 
-Campos procesados:
+Campos:
 
-- `nombre` (obligatorio)
-- `apellidos` (obligatorio)
-- `telefono` (opcional)
+- `nombre`, `apellidos` (obligatorios)
+- `telefono`, `notas` (opcionales)
 - `domicilio` (obligatorio)
+- `fecha_nacimiento` (opcional)
 - `rut` (obligatorio, validado y único)
-- `notas` (opcional)
+- `latitud`, `longitud` (opcionales; macro de mapa)
+- Sección **Ubicación en el Mapa** (`macros/vecino_ubicacion_mapa.html`)
 
-Reglas:
-
-- Se valida RUT (DV correcto).
-- Se impide duplicado de RUT (comparación normalizada).
-- Se guarda RUT **formateado**.
-- Al crear:
-  - Inserta `Vecino`
-  - Registra acción en `RegistroAccion` (crear)
-  - Registra movimiento en `RegistroMovimiento` (entidad `vecino`, acción `crear`)
-
-Resultado:
-
-- Flash “Vecino agregado exitosamente”
-- Redirige a `/dashboard`.
+Al crear: inserta vecino, aplica ubicación/geocodificación, registra auditoría.
 
 #### `GET|POST /vecinos/<id>/editar`
 
 Pantalla: `templates/editar_vecino.html`
 
-Comportamiento:
-
-- En `GET`:
-  - Registra “ver” (auditoría) indicando que accedió al formulario de edición.
-- En `POST`:
-  - Revalida RUT.
-  - Verifica unicidad de RUT excluyendo el propio id.
-  - Calcula lista de cambios (campo a campo) y la guarda en `detalles`.
-  - Actualiza el vecino.
-  - Registra en `RegistroAccion` y `RegistroMovimiento` como `editar`.
-
-Resultado:
-
-- Flash “Vecino actualizado exitosamente”
-- Redirige a `/dashboard`.
+- Pasa `vecino.id` al macro de mapa (`excluir_id` en referencias).
+- Revalida RUT, fecha de nacimiento y cambios de domicilio/coords.
+- Si hay coords manuales nuevas, no re-geocodifica automáticamente; si cambió domicilio sin coords, re-geocodifica.
+- Registra cambios campo a campo en auditoría.
 
 #### `GET /vecinos/<id>`
 
-Pantalla: `templates/ver_vecino.html`
-
-- Muestra una ficha/detalle del vecino.
-- Registra auditoría “ver”.
+Pantalla: `templates/ver_vecino.html` — ficha de detalle del vecino.
 
 #### `GET /vecinos/<id>/eliminar`
 
-- Elimina definitivamente (hard delete) el vecino.
-- También borra registros en `RegistroAccion` asociados (por compatibilidad).
-- Registra movimiento “eliminar”.
-- Muestra confirmación en la UI (en dashboard hay `confirm()`).
+Hard delete del vecino + limpieza de `RegistroAccion` asociados + movimiento de auditoría.
 
-### 8.4 Certificados de Residencia (CRUD + PDF + vista previa)
+### 9.4 Personas por Casa
 
-Pantallas:
+Pantalla: `templates/casas.html`
 
-- `templates/certificados.html` (listado)
-- `templates/nuevo_certificado.html` (crear)
-- `templates/editar_certificado.html` (editar)
-- `templates/certificado_plantilla.html` (plantilla/preview/impresión)
+#### `GET /casas`
+
+Agrupa vecinos activos por domicilio normalizado (`_normalize_domicilio_key`):
+
+- Domicilios escritos distinto (mayúsculas, puntos, espacios) pueden aparecer como casas distintas si la clave normalizada difiere.
+- El domicilio mostrado es el más frecuente entre integrantes.
+
+**Columnas**: Domicilio, Integrantes, Tipo (`Individual` / `Compartida`), Mapa (si algún integrante tiene ubicación).
+
+**Estadísticas**:
+
+- Total casas e integrantes
+- Promedio por casa
+- Casa más habitada
+- Distribución: solas (1 persona) vs compartidas (2+)
+
+**Búsqueda** (`q`): domicilio, calle, nombre/apellido o RUT de integrantes.
+
+**Orden**: `domicilio`, `integrantes`, `tipo`, `mapa`.
+
+**Paginación**: 10 casas por página (`SimplePagination` sobre lista en memoria).
+
+**Fila expandible**: lista de integrantes con enlaces a editar/ver.
+
+### 9.5 Mapa del Sector
+
+Pantalla: `templates/mapa_sector.html`
+
+#### `GET /mapa`
+
+Mapa Leaflet a pantalla completa con:
+
+- Cuadrante del sector delimitado.
+- Clustering de marcadores (MarkerCluster).
+- Pines con forma de casa al máximo zoom; clusters resumidos al alejar.
+- Estadísticas: vecinos con ubicación, pines activos, estado.
+- Controles: centrar, mostrar/ocultar pines, filtro (`todos|con_ubicacion|sin_ubicacion`), recargar datos.
+- Panel de vecinos sin ubicación.
+- Modal con detalle de domicilio e integrantes al hacer clic en pin.
+
+#### `GET /api/mapa/datos`
+
+JSON con configuración del mapa, estadísticas, marcadores agrupados y lista `sin_ubicacion`. Parámetro `filtro`.
+
+#### `GET /api/mapa/referencias-picker`
+
+Marcadores simplificados (domicilio, lat, lng) para el picker de formularios. Parámetro `excluir_id`.
+
+#### `POST /api/geocodificar-domicilio`
+
+Geocodifica un domicilio puntual; retorna lat/lng, si está en cuadrante, avisos.
+
+#### `GET /api/mapa/sincronizacion`
+
+Estado del job de sincronización masiva.
+
+#### `POST /api/mapa/geocodificar`
+
+Inicia sincronización masiva de ubicaciones pendientes.
+
+### 9.6 Certificados de Residencia (CRUD + PDF + vista previa)
+
+Pantallas: `certificados.html`, `nuevo_certificado.html`, `editar_certificado.html`, `certificado_plantilla.html`
 
 #### `GET /certificados`
 
-Listado con:
+Listado con **filtros por columna** (macros data-table):
 
-- Columnas:
-  - #, Fecha, Nombres, Apellidos, RUT, Dirección, Pago, Acciones
-- Filtros:
-  - Búsqueda por nombres, apellidos, rut, dirección
-  - Filtro por pago: `SI|NO|Todos`
-  - Orden por: fecha, nombres, apellidos, rut, dirección, pago, fecha_creacion
-  - Orden asc/desc
+- `f_fecha`, `f_nombres`, `f_apellidos`, `f_rut`, `f_direccion`, `f_pago` (`SI|NO|Todos`)
+- Orden: fecha, nombres, apellidos, rut, dirección, pago, fecha_creacion
 - Paginación: 10 por página
-- Acciones por fila:
-  - **Vista previa** (abre modal con iframe embebido)
-  - **Descargar** (PDF)
-  - **Editar**
-  - **Eliminar**
+- Acciones: Vista previa (modal iframe), Descargar PDF, Editar, Eliminar
 
 #### `GET|POST /certificados/nuevo`
 
-Campos (POST):
+Campos: fecha, nombres, apellidos, rut, dirección, presentado_en, pago.
 
-- `fecha` (formato HTML date `YYYY-MM-DD`, obligatorio)
-- `nombres` (obligatorio)
-- `apellidos` (obligatorio)
-- `rut` (obligatorio, validado y formateado)
-- `direccion` (obligatorio)
-- `presentado_en` (obligatorio en formulario)
-- `pago` (checkbox/valor; se interpreta como `si|sí|true|1|on`)
-
-Al crear el certificado:
-
-- Inserta `CertificadoResidencia`.
-- Intenta generar PDF:
-  - Asegura tipo `Certificados de residencia` en `DocumentoTipo`.
-  - Genera PDF desde el **mismo HTML** de `certificado_plantilla.html` con Playwright (Chromium headless).
-  - Guarda el PDF como archivo en `uploads/`.
-  - Crea un registro `Documento` asociado y guarda `cert.documento_id`.
-  - Registra movimiento para el `Documento`.
-- Registra movimiento para el `Certificado` (crear).
-
-Redirección:
-
-- Soporta parámetro `next` (solo si comienza con `/`) para volver a una URL interna.
+Al crear: inserta certificado, genera PDF con Playwright, crea Documento vinculado, registra auditoría. Soporta `next` interno.
 
 #### `GET|POST /certificados/<id>/editar`
 
-- Revalida y actualiza campos.
-- Regenera PDF:
-  - Si ya existe `documento_id`, actualiza el Documento con el nuevo archivo.
-  - Si no existe, crea el Documento y lo vincula.
-- Registra movimientos (editar en certificado y crear/editar en documento).
+Actualiza campos y regenera PDF (actualiza o crea Documento).
 
 #### `GET /certificados/<id>/imprimir`
 
-Devuelve HTML de `certificado_plantilla.html`.
+HTML de plantilla para impresión/vista previa (`embed=1` para iframe).
 
-- Se usa para “vista previa” (en modal iframe) con query `embed=1`.
-- Registra movimiento “ver”.
+#### `GET /certificados/<id>/ver`
+
+Vista previa embebible: sirve el PDF si existe; si no, plantilla HTML.
 
 #### `GET /certificados/<id>/pdf`
 
-Descarga el PDF vinculado (desde `Documento.archivo_ruta`).
-
-- Si el archivo no existe, muestra error.
-- Registra movimiento “descargar” tanto en certificado como en documento.
+Descarga del PDF vinculado.
 
 #### `GET /certificados/<id>/eliminar`
 
-Eliminación definitiva (hard delete):
+Hard delete del certificado + Documento asociado + archivo físico.
 
-- Borra certificado y, si existe, también el Documento asociado.
-- Intenta eliminar el archivo físico del PDF en `uploads/`.
-- Registra movimientos “eliminar”.
+### 9.7 Documentos (subida, tipos, agrupación, descarga, vista previa)
 
-### 8.5 Documentos (subida, tipos, agrupación, descarga, vista previa)
-
-Pantallas:
-
-- `templates/documentos.html` (cards por tipo)
-- `templates/documentos_tipos.html` (admin de tipos)
-- `templates/nuevo_documento.html` (subida)
-- `templates/documentos_tipo.html` (listado por tipo)
+Pantallas: `documentos.html`, `documentos_tipos.html`, `nuevo_documento.html`, `documentos_tipo.html`
 
 #### `GET /documentos`
 
-Muestra tarjetas (cards) por tipo:
-
-- Lista **todos los tipos activos**, incluso si tienen 0 documentos.
-- Cada card muestra:
-  - nombre del tipo
-  - cantidad de documentos activos en ese tipo
-  - enlace para ver documentos del tipo
-- Botones:
-  - “+ Subir Documento” (`/documentos/nuevo`)
-  - “Administrar tipos” (`/documentos/tipos`)
-- (Solo Admin) en cada card aparece un botón para **eliminar tipo** (si cumple condiciones).
+Cards por tipo (incluye tipos con 0 documentos). Botones subir y administrar tipos.
 
 #### `GET|POST /documentos/tipos`
 
-Permite:
+CRUD de tipos (soft delete = desactivar).
 
-- Crear un tipo nuevo (POST `nombre`).
-- Si ya existe y estaba desactivado, lo reactiva.
-- Lista tipos activos.
-- Registra movimiento “crear” al agregar tipo.
+#### `GET /documentos/tipos/<id>/eliminar` (Admin)
 
-#### `GET /documentos/tipos/<id>/eliminar` (solo Admin)
-
-Desactiva (soft delete) un tipo si:
-
-- No es el tipo reservado **Certificados de residencia**.
-- No tiene documentos activos asociados.
-
-Registra movimiento “eliminar” y marca `activo = False`.
+Desactiva tipo si no es reservado y no tiene documentos activos.
 
 #### `GET|POST /documentos/nuevo`
 
-Subida de documento genérico (no certificado):
-
-- Campos:
-  - `nombre` (obligatorio)
-  - `tipo` (obligatorio y debe existir como `DocumentoTipo` activo)
-  - `archivo` (obligatorio; extensión permitida)
-- Guardado:
-  - Sanitiza nombre con `secure_filename`.
-  - Guarda archivo en `uploads/` con prefijo timestamp.
-  - Crea registro `Documento`.
-  - Registra movimiento “crear”.
-
-Caso especial:
-
-- Si se intenta subir con tipo `Certificados de residencia`, la UI redirige/indica que esos se crean desde el módulo de certificados.
-- En `GET /documentos/nuevo?tipo=<tipo>` precarga el tipo en el formulario (si no es el reservado).
+Subida genérica con validación de extensión. Tipo reservado redirige al módulo de certificados.
 
 #### `GET /documentos/tipo/<tipo>`
 
-Listado de documentos de un tipo (paginado, estilo “grid/listado” según plantilla):
+Listado paginado (12/página) con búsqueda y orden.
 
-- Búsqueda por:
-  - `Documento.nombre`
-  - `Documento.archivo_nombre`
-- Orden por:
-  - `nombre`, `archivo`, `fecha_creacion`
-- Paginación:
-  - 12 por página
+#### `GET /documentos/<id>/archivo` — descarga attachment.
 
-#### `GET /documentos/<id>/archivo`
+#### `GET /documentos/<id>/ver` — vista previa inline (PDF/imagen).
 
-Descarga del archivo adjunto (como attachment).
+#### `GET /documentos/<id>/eliminar` — hard delete + archivo físico. Soporta `?next=`.
 
-- Registra movimiento “descargar”.
-
-#### `GET /documentos/<id>/ver`
-
-Vista previa inline (solo PDF/imagenes).
-
-- Si el archivo no es previsualizable, muestra aviso y redirige al listado.
-- Registra movimiento “ver”.
-
-#### `GET /documentos/<id>/eliminar`
-
-Elimina definitivamente el documento:
-
-- Intenta borrar el archivo físico en `uploads/`.
-- Borra el registro `Documento`.
-- Registra movimiento “eliminar”.
-- Soporta `?next=/ruta` para volver a una URL interna.
-
-### 8.6 Usuarios (solo Admin)
+### 9.8 Usuarios (solo Admin)
 
 Pantalla: `templates/usuarios.html`
 
 #### `GET /usuarios`
 
-- Lista usuarios existentes.
-- Permite seleccionar roles válidos: `Admin`, `Presidente`, `Vicepresidente`, `Asistente`.
+Lista con filtros: `f_username`, `f_email`, `f_role`.
 
-#### `POST /usuarios/nuevo`
+#### `POST /usuarios/nuevo`, `POST /usuarios/<id>/rol`, `POST /usuarios/<id>/reset-password`
 
-Crea usuario:
+Gestión de usuarios con validaciones de rol y password mínimo 6 caracteres.
 
-- Requiere `username`, `email`, `password`, `role`.
-- Password mínimo: 6 caracteres.
-- Username y email deben ser únicos.
-- Registra movimiento “crear”.
-
-#### `POST /usuarios/<id>/rol`
-
-Actualiza rol:
-
-- Valida que el rol esté en el set permitido.
-- Evita que el admin actual se quite a sí mismo el rol Admin por accidente.
-- Sincroniza `es_admin = (role == 'Admin')`.
-- Registra movimiento “editar”.
-
-#### `POST /usuarios/<id>/reset-password`
-
-Resetea contraseña:
-
-- Password mínimo: 6 caracteres.
-- Registra movimiento “editar”.
-
-### 8.7 Mi cuenta
-
-Pantalla: `templates/mi_cuenta.html`
+### 9.9 Mi cuenta
 
 #### `GET|POST /mi-cuenta`
 
-Permite cambiar tu propia contraseña:
+Cambio de contraseña propia con verificación de contraseña actual.
 
-- Verifica contraseña actual.
-- Nueva contraseña mínimo 6 caracteres.
-- Confirmación (repetir) debe coincidir.
-- Registra movimiento “editar”.
-
-### 8.8 Historial / auditoría (solo Admin)
+### 9.10 Historial / auditoría (solo Admin)
 
 Pantalla: `templates/registros.html`
 
 #### `GET /registros`
 
-Listado paginado (20 por página) de `RegistroMovimiento`, con filtros:
+Listado paginado (20/página) con filtros:
 
-- `usuario`: puede ser id numérico o parte del nombre.
-- `desde`: fecha `YYYY-MM-DD` (inicio del rango).
-- `hasta`: fecha `YYYY-MM-DD` (fin del rango; se ajusta a 23:59:59.999999).
+- `f_usuario` (id o nombre)
+- `f_desde`, `f_hasta` (YYYY-MM-DD)
+- `f_accion`, `f_entidad`, `f_detalles`
+- Orden: `fecha_hora`, `usuario`, `accion`, `entidad`
 
-Se muestran movimientos ordenados por fecha descendente.
-
-### 8.9 Validación de RUT (utilidad)
+### 9.11 Validación de RUT (utilidad)
 
 #### `GET|POST /validar-rut`
 
-Página de prueba para validar un RUT manualmente y mostrar el resultado.
+Página de prueba manual.
 
 #### `POST /api/verificar-rut`
 
-API JSON para validar y verificar disponibilidad:
+API JSON: `{ rut, excluir_id? }` → `{ valido, mensaje }`.
 
-- Entrada JSON:
-  - `rut` (string)
-  - `excluir_id` (opcional; para edición)
-- Respuesta JSON:
-  - `valido` (bool)
-  - `mensaje` (string)
+## 10) Archivos físicos y generación de PDFs
 
-## 9) Archivos físicos y generación de PDFs
+### 10.1 Carpeta de uploads
 
-### 9.1 Carpeta de uploads
-
-Todos los archivos subidos/generados se guardan en:
-
-- `uploads/` (en la raíz de la app)
+- `uploads/` en la raíz de la app.
 
 Nomenclatura:
 
 - Documentos genéricos: `doc_<timestamp>_<archivo_sanitizado>`
 - PDFs de certificados: `certhtml_<timestamp>_<archivo_sanitizado>.pdf`
 
-### 9.2 Generación de PDF de certificado
+### 10.2 Generación de PDF de certificado
 
-Proceso:
+- Renderiza `certificado_plantilla.html` con datos del certificado.
+- Logo embebido en Base64 si existe `static/junta de vecinos.jpg`.
+- Playwright Chromium headless → PDF A4, `print_background=True`, márgenes 0.
+- Se registra como `Documento` del tipo reservado.
 
-- Se renderiza `certificado_plantilla.html` con los datos del certificado.
-- Se intenta embebeder el logo como Base64 (si existe `static/junta de vecinos.jpg`).
-- Playwright lanza Chromium headless y “imprime” a PDF:
-  - Formato A4
-  - `print_background=True`
-  - márgenes 0
+## 11) Estructura de archivos del proyecto
 
-El PDF resultante se guarda en disco y se registra como `Documento` del tipo reservado.
+```
+JuntaDeVecinos/
+├── app.py                    # Aplicación Flask (modelos, rutas, lógica)
+├── requirements.txt
+├── config.env                # Plantilla de variables (.env)
+├── web.md                    # Este documento
+├── README.md
+├── setup.py
+├── static/
+│   └── junta de vecinos.jpg  # Logo
+├── uploads/                  # Archivos subidos/generados (gitignored parcialmente)
+└── templates/
+    ├── base.html
+    ├── index.html, login.html
+    ├── dashboard.html
+    ├── casas.html
+    ├── mapa_sector.html
+    ├── nuevo_vecino.html, editar_vecino.html, ver_vecino.html
+    ├── certificados.html, nuevo_certificado.html, editar_certificado.html
+    ├── certificado_plantilla.html
+    ├── documentos.html, documentos_tipos.html, documentos_tipo.html, nuevo_documento.html
+    ├── usuarios.html, mi_cuenta.html, registros.html
+    └── macros/
+        ├── data_table.html
+        ├── vecino_detail.html
+        ├── casa_detail.html
+        ├── vecino_ubicacion_mapa.html
+        └── certificado_preview.html
+```
 
-## 10) Comportamientos/decisiones relevantes
+## 12) Comportamientos/decisiones relevantes
 
-- **Sin cache del navegador**: después de cada request se agregan headers `no-store/no-cache` para evitar ver páginas antiguas si cambian datos directamente en MySQL.
+- **Sin cache del navegador**: headers `no-store/no-cache` en cada respuesta.
 - **Soft vs hard delete**:
-  - Vecinos, certificados y documentos: el flujo implementado elimina definitivamente (hard delete) en las rutas de eliminación.
-  - Tipos de documento: se “eliminan” desactivando (`activo=False`) si no hay documentos asociados.
-- **Consistencia del historial**:
-  - La vista de historial oculta movimientos huérfanos para evitar inconsistencias si se manipula la DB manualmente.
+  - Vecinos, certificados y documentos: hard delete en rutas de eliminación.
+  - Tipos de documento: soft delete (`activo=False`).
+- **Consistencia del historial**: oculta movimientos huérfanos.
+- **Paginación en memoria**: `SimplePagination` + `_paginate_list` para listas derivadas (casas); `iter_pages()` con lógica `last` estilo Flask-SQLAlchemy (evita múltiples `…` consecutivos).
+- **Certificados por vecino**: en dashboard se vinculan certificados activos por RUT normalizado.
+- **Geocodificación fuera de cuadrante**: se guardan coords pero se registra aviso en `geocodificacion_error`.
+- **No hay flag DB** que distinga ubicación manual vs automática; las referencias del picker usan todos los vecinos con lat/lng.
 
-## 11) Resumen rápido de endpoints (mapa)
+## 13) Resumen rápido de endpoints (mapa)
 
 Públicos:
 
@@ -675,10 +636,18 @@ Autenticados:
 - `GET|POST /vecinos/<id>/editar`
 - `GET /vecinos/<id>`
 - `GET /vecinos/<id>/eliminar`
+- `GET /casas`
+- `GET /mapa`
+- `GET /api/mapa/datos`
+- `GET /api/mapa/referencias-picker`
+- `POST /api/geocodificar-domicilio`
+- `GET /api/mapa/sincronizacion`
+- `POST /api/mapa/geocodificar`
 - `GET /certificados`
 - `GET|POST /certificados/nuevo`
 - `GET|POST /certificados/<id>/editar`
 - `GET /certificados/<id>/imprimir`
+- `GET /certificados/<id>/ver`
 - `GET /certificados/<id>/pdf`
 - `GET /certificados/<id>/eliminar`
 - `GET /documentos`
@@ -698,4 +667,3 @@ Solo Admin:
 - `POST /usuarios/<id>/rol`
 - `POST /usuarios/<id>/reset-password`
 - `GET /registros`
-

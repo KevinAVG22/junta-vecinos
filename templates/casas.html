@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% from "macros/data_table.html" import th_label, table_toolbar, pagination_nav, table_filter_script, dt_cell %}
+{% from "macros/casa_detail.html" import casa_collapse_panel %}
+
+{% block title %}Personas por Casa - Junta de Vecinos{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-slate-100">Personas por Casa</h1>
+            <p class="text-gray-600 dark:text-slate-300 mt-2">Direcciones registradas e integrantes por domicilio. Haz clic en una fila para ver el detalle.</p>
+        </div>
+        <a href="{{ url_for('dashboard') }}"
+           class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">
+            Volver
+        </a>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-indigo-50 dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-indigo-900 dark:text-slate-200">Total de casas</p>
+        <p class="text-2xl font-bold text-indigo-600">{{ stats_totales.total_casas }}</p>
+        <p class="text-xs text-indigo-700/80 dark:text-slate-400 mt-1">{{ stats_totales.total_integrantes }} vecinos registrados</p>
+    </div>
+    <div class="bg-emerald-50 dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-emerald-900 dark:text-slate-200">Promedio por casa</p>
+        <p class="text-2xl font-bold text-emerald-600">{{ stats_totales.promedio_integrantes }}</p>
+        <p class="text-xs text-emerald-700/80 dark:text-slate-400 mt-1">personas por domicilio</p>
+    </div>
+    <div class="bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-amber-900 dark:text-slate-200">Casa más habitada</p>
+        <p class="text-2xl font-bold text-amber-600">{{ stats_totales.max_integrantes }}</p>
+        <p class="text-xs text-amber-800/80 dark:text-slate-400 mt-1 truncate" title="{{ stats_totales.casa_mas_habitada }}">
+            {{ stats_totales.casa_mas_habitada or '—' }}
+        </p>
+    </div>
+    <div class="bg-violet-50 dark:bg-slate-900 border border-violet-200 dark:border-slate-800 rounded-lg p-4">
+        <p class="text-sm font-medium text-violet-900 dark:text-slate-200">Distribución</p>
+        <p class="text-sm font-semibold text-violet-700 dark:text-violet-300 mt-1">
+            {{ stats_totales.casas_un_integrante }} solas · {{ stats_totales.casas_multiples }} compartidas
+        </p>
+        <p class="text-xs text-violet-700/80 dark:text-slate-400 mt-1">1 persona vs 2 o más</p>
+    </div>
+</div>
+
+{% if stats_totales.total_casas > 0 or q %}
+<div class="bg-white dark:bg-slate-900 shadow-md rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800">
+    <form method="GET" action="{{ url_for('casas_sector') }}" data-dt-form>
+        <input type="hidden" name="sort_by" value="{{ sort_by }}" data-dt-sort-by>
+        <input type="hidden" name="sort_order" value="{{ sort_order }}" data-dt-sort-order>
+
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-950/80">
+            <label for="q" class="sr-only">Buscar casas</label>
+            <div class="relative max-w-xl">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input type="text" id="q" name="q" value="{{ q }}"
+                       placeholder="Buscar por domicilio, calle o nombre de integrante…"
+                       class="dashboard-global-search w-full pl-10 pr-3 py-2.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary dark:bg-slate-950 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500"
+                       autocomplete="off">
+            </div>
+        </div>
+
+        {{ table_toolbar(url_for('casas_sector'), has_filters, 'Mostrando ' ~ (casas|length) ~ ' de ' ~ casas_filtradas ~ ' casas' ~ (' (filtradas de ' ~ stats_totales.total_casas ~ ' total)' if has_filters else '')) }}
+
+        {% if casas %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-800">
+                <thead class="bg-gray-50 dark:bg-slate-950">
+                    <tr class="border-b border-gray-200 dark:border-slate-800">
+                        {{ th_label('Domicilio', true, 'domicilio', sort_by, sort_order) }}
+                        {{ th_label('Integrantes', true, 'integrantes', sort_by, sort_order) }}
+                        {{ th_label('Tipo', true, 'tipo', sort_by, sort_order) }}
+                        {{ th_label('Mapa', true, 'mapa', sort_by, sort_order) }}
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-slate-800">
+                    {% for casa in casas %}
+                    <tr class="casa-row group hover:bg-gray-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                        data-detail-id="casa-detail-{{ loop.index }}"
+                        tabindex="0"
+                        role="button"
+                        aria-expanded="false"
+                        aria-controls="casa-detail-{{ loop.index }}">
+                        <td class="px-3 py-3 text-sm text-gray-900 dark:text-slate-100{% if q and (casa.domicilio|matches_term(q)) %} dt-cell-match{% endif %}">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <svg class="casa-chevron h-4 w-4 text-gray-400 group-hover:text-primary transition-transform duration-200 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                </svg>
+                                <span class="truncate">
+                                    {% if q and (casa.domicilio|matches_term(q)) %}
+                                        {{ casa.domicilio|highlight(q)|safe }}
+                                    {% else %}
+                                        {{ casa.domicilio }}
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold
+                                {% if casa.count == 1 %}bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200
+                                {% elif casa.count == 2 %}bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300
+                                {% elif casa.count <= 4 %}bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300
+                                {% else %}bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300{% endif %}">
+                                {{ casa.count }}
+                            </span>
+                        </td>
+                        {{ dt_cell(casa.tipo, q) }}
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-slate-100">
+                            {% if casa.con_ubicacion %}
+                            <span class="text-emerald-600 dark:text-emerald-400 text-xs font-medium">Sí</span>
+                            {% else %}
+                            <span class="text-gray-400 dark:text-slate-500 text-xs">No</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr id="casa-detail-{{ loop.index }}" class="casa-detail-row hidden" aria-hidden="true">
+                        <td colspan="4" class="p-0">
+                            {{ casa_collapse_panel(casa) }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="px-6 py-12 text-center">
+            <div class="text-4xl mb-3">🔍</div>
+            <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">No se encontraron casas</h3>
+            <p class="text-gray-600 dark:text-slate-300">
+                No hay resultados para «{{ q }}».
+                <a href="{{ url_for('casas_sector') }}" class="text-primary hover:text-emerald-700 ml-1">Limpiar búsqueda</a>
+            </p>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+{{ pagination_nav(pagination, 'casas_sector', page_params) }}
+
+{% else %}
+<div class="text-center py-12">
+    <div class="text-6xl mb-4">🏠</div>
+    <h3 class="text-lg font-medium text-gray-900 dark:text-slate-100 mb-2">No hay domicilios registrados</h3>
+    <p class="text-gray-600 dark:text-slate-300 mb-6">Agrega vecinos con domicilio para ver el listado de casas.</p>
+    <a href="{{ url_for('nuevo_vecino') }}"
+       class="bg-primary hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">
+        Agregar Vecino
+    </a>
+</div>
+{% endif %}
+
+{{ table_filter_script() }}
+
+<script>
+(function() {
+    const form = document.querySelector('form[data-dt-form][action*="casas"]');
+    const searchInput = document.getElementById('q');
+    if (!form || !searchInput) return;
+
+    let debounceTimer = null;
+
+    function applySearch() {
+        const params = new URLSearchParams();
+        const term = searchInput.value.trim();
+        if (term) params.set('q', term);
+
+        const sortBy = form.querySelector('[data-dt-sort-by]');
+        const sortOrder = form.querySelector('[data-dt-sort-order]');
+        if (sortBy && sortBy.value) params.set('sort_by', sortBy.value);
+        if (sortOrder && sortOrder.value) params.set('sort_order', sortOrder.value);
+
+        const qs = params.toString();
+        window.location.href = form.getAttribute('action') + (qs ? '?' + qs : '');
+    }
+
+    searchInput.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(applySearch, 700);
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            clearTimeout(debounceTimer);
+            applySearch();
+        }
+    });
+
+    searchInput.addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+})();
+</script>
+
+<script>
+(function() {
+    function closeAllDetails() {
+        document.querySelectorAll('.casa-detail-row').forEach(function(row) {
+            row.classList.add('hidden');
+            row.setAttribute('aria-hidden', 'true');
+        });
+        document.querySelectorAll('.casa-row').forEach(function(row) {
+            row.setAttribute('aria-expanded', 'false');
+            row.classList.remove('bg-emerald-50', 'dark:bg-emerald-950/30');
+            const chevron = row.querySelector('.casa-chevron');
+            if (chevron) chevron.classList.remove('rotate-90', 'text-primary');
+        });
+    }
+
+    function toggleRow(row) {
+        const detailId = row.getAttribute('data-detail-id');
+        const detail = document.getElementById(detailId);
+        if (!detail) return;
+
+        const isOpen = !detail.classList.contains('hidden');
+        closeAllDetails();
+        if (!isOpen) {
+            detail.classList.remove('hidden');
+            detail.setAttribute('aria-hidden', 'false');
+            row.setAttribute('aria-expanded', 'true');
+            row.classList.add('bg-emerald-50', 'dark:bg-emerald-950/30');
+            const chevron = row.querySelector('.casa-chevron');
+            if (chevron) chevron.classList.add('rotate-90', 'text-primary');
+        }
+    }
+
+    document.querySelectorAll('.casa-row').forEach(function(row) {
+        row.addEventListener('click', function(e) {
+            if (e.target.closest('a, button, input, select, textarea, label')) return;
+            toggleRow(row);
+        });
+        row.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleRow(row);
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

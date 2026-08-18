@@ -1,4 +1,4 @@
-{% macro vecino_ubicacion_mapa(map_config, lat='', lng='') %}
+{% macro vecino_ubicacion_mapa(map_config, lat='', lng='', vecino_id=none) %}
 <div class="border-t border-gray-200 dark:border-slate-700 pt-6 mt-2">
     <h3 class="text-base font-semibold text-gray-900 dark:text-slate-100 flex items-center gap-2 mb-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -56,8 +56,9 @@
                 <div class="text-sm font-semibold text-gray-900 dark:text-slate-100">Seleccionar ubicación en el mapa</div>
                 <button type="button" id="pickerMapClose" class="text-sm bg-gray-200 hover:bg-gray-300 dark:bg-slate-800 dark:hover:bg-slate-700 px-3 py-2 rounded-md">Cerrar</button>
             </div>
-            <div class="px-4 py-2 text-xs text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-800">
-                Haz clic en el mapa para marcar la ubicación exacta del vecino dentro del cuadrante.
+            <div class="px-4 py-2 text-xs text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-800 space-y-1">
+                <p>Haz clic en un <span class="text-blue-600 dark:text-blue-400 font-medium">punto azul</span> para usar esa dirección, o en el mapa para marcar una nueva ubicación (pin verde).</p>
+                <p>Al confirmar, el campo domicilio se completará si elegiste un pin existente.</p>
             </div>
             <div id="picker-map" class="w-full bg-slate-100 dark:bg-slate-950" style="height: min(60vh, 520px);"></div>
             <div class="px-4 py-3 flex justify-end gap-2 border-t border-gray-200 dark:border-slate-800">
@@ -67,11 +68,42 @@
     </div>
 </div>
 
+<style>
+    .picker-ref-tooltip {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 6px;
+        white-space: nowrap;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+    }
+    #picker-map .picker-ref-marker {
+        cursor: pointer;
+    }
+    .picker-selection-icon {
+        background: transparent;
+        border: none;
+    }
+    .picker-selection-pin {
+        width: 28px;
+        height: 28px;
+        border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg);
+        background: #059669;
+        border: 2px solid #fff;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+</style>
+
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
 (function() {
     const MAP_CONFIG = {{ map_config | tojson }};
+    const EXCLUIR_VECINO_ID = {{ vecino_id|tojson if vecino_id else 'null' }};
     const QUADRANTE_BOUNDS = [
         [MAP_CONFIG.bounds.south, MAP_CONFIG.bounds.west],
         [MAP_CONFIG.bounds.north, MAP_CONFIG.bounds.east],
@@ -85,6 +117,17 @@
     let pickerMap = null;
     let pickerMarker = null;
     let pickedLatLng = null;
+    let pickedDomicilio = null;
+    let referenciaLayer = null;
+    let referenciaMarcadores = [];
+    const NEAR_PIN_METERS = 25;
+
+    const selectionIcon = L.divIcon({
+        className: 'picker-selection-icon',
+        html: '<div class="picker-selection-pin"></div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 28],
+    });
 
     function showFeedback(msg, ok) {
         feedback.textContent = msg;
@@ -128,6 +171,78 @@
         }
     });
 
+    async function loadReferenciasPicker() {
+        let url = '{{ url_for("api_mapa_referencias_picker") }}';
+        if (EXCLUIR_VECINO_ID) url += '?excluir_id=' + encodeURIComponent(EXCLUIR_VECINO_ID);
+        const res = await fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.marcadores || [];
+    }
+
+    function drawReferencias(marcadores) {
+        if (!pickerMap) return;
+        referenciaMarcadores = marcadores || [];
+        if (!referenciaLayer) {
+            referenciaLayer = L.layerGroup().addTo(pickerMap);
+        }
+        referenciaLayer.clearLayers();
+        referenciaMarcadores.forEach(function(m) {
+            const marker = L.circleMarker([m.lat, m.lng], {
+                radius: 8,
+                color: '#1d4ed8',
+                fillColor: '#3b82f6',
+                fillOpacity: 0.9,
+                weight: 2,
+                className: 'picker-ref-marker',
+            })
+            .bindTooltip(m.domicilio + ' (clic para usar)', {
+                direction: 'top',
+                offset: [0, -6],
+                className: 'picker-ref-tooltip',
+            });
+            marker.on('click', function(e) {
+                L.DomEvent.stopPropagation(e);
+                selectReferencia(m);
+            });
+            marker.addTo(referenciaLayer);
+        });
+    }
+
+    function findNearestReferencia(latlng) {
+        if (!pickerMap || !referenciaMarcadores.length) return null;
+        let best = null;
+        let bestDist = Infinity;
+        referenciaMarcadores.forEach(function(m) {
+            const dist = pickerMap.distance(latlng, L.latLng(m.lat, m.lng));
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = m;
+            }
+        });
+        return best && bestDist <= NEAR_PIN_METERS ? best : null;
+    }
+
+    function applyDomicilioFromReferencia(m, msgPrefix) {
+        if (!m || !m.domicilio) return;
+        pickedDomicilio = m.domicilio;
+        if (domicilioInput) {
+            domicilioInput.value = m.domicilio;
+        }
+        showFeedback((msgPrefix || 'Domicilio seleccionado') + ': ' + m.domicilio, true);
+    }
+
+    function selectReferencia(m) {
+        placeSelectionMarker(L.latLng(m.lat, m.lng));
+        applyDomicilioFromReferencia(m, 'Domicilio seleccionado');
+    }
+
+    function placeSelectionMarker(latlng) {
+        pickedLatLng = latlng;
+        if (pickerMarker) pickerMarker.setLatLng(latlng);
+        else pickerMarker = L.marker(latlng, { icon: selectionIcon, zIndexOffset: 1000 }).addTo(pickerMap);
+    }
+
     function initPickerMap() {
         if (pickerMap) {
             pickerMap.invalidateSize();
@@ -144,24 +259,35 @@
         pickerMap.fitBounds(QUADRANTE_BOUNDS, { padding: [20, 20] });
 
         pickerMap.on('click', function(e) {
-            pickedLatLng = e.latlng;
-            if (pickerMarker) pickerMarker.setLatLng(e.latlng);
-            else pickerMarker = L.marker(e.latlng).addTo(pickerMap);
+            placeSelectionMarker(e.latlng);
+            const near = findNearestReferencia(e.latlng);
+            if (near) {
+                applyDomicilioFromReferencia(near, 'Ubicación cercana a domicilio existente');
+            } else {
+                pickedDomicilio = null;
+            }
         });
     }
 
-    function openPicker() {
+    async function openPicker() {
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
-        setTimeout(function() {
+        pickedDomicilio = null;
+        setTimeout(async function() {
             initPickerMap();
+            pickerMap.invalidateSize();
+
+            const marcadores = await loadReferenciasPicker();
+            drawReferencias(marcadores);
+
             const lat = parseFloat(String(latInput.value).replace(',', '.'));
             const lng = parseFloat(String(lngInput.value).replace(',', '.'));
             if (!isNaN(lat) && !isNaN(lng)) {
-                pickedLatLng = L.latLng(lat, lng);
-                if (pickerMarker) pickerMarker.setLatLng(pickedLatLng);
-                else pickerMarker = L.marker(pickedLatLng).addTo(pickerMap);
-                pickerMap.setView(pickedLatLng, 17);
+                placeSelectionMarker(L.latLng(lat, lng));
+                pickerMap.setView(L.latLng(lat, lng), 17);
+            } else if (marcadores.length > 0) {
+                const bounds = L.latLngBounds(marcadores.map(function(m) { return [m.lat, m.lng]; }));
+                pickerMap.fitBounds(bounds.pad(0.15), { maxZoom: 17 });
             }
         }, 120);
     }
@@ -181,7 +307,14 @@
             showFeedback('Haz clic en el mapa para elegir una ubicación.', false);
             return;
         }
-        setCoords(pickedLatLng.lat, pickedLatLng.lng, 'Ubicación seleccionada manualmente en el mapa.', true);
+        if (domicilioInput && pickedDomicilio && !(domicilioInput.value || '').trim()) {
+            domicilioInput.value = pickedDomicilio;
+        }
+        let msg = 'Ubicación seleccionada manualmente en el mapa.';
+        if (pickedDomicilio) {
+            msg = 'Ubicación y domicilio guardados: ' + pickedDomicilio;
+        }
+        setCoords(pickedLatLng.lat, pickedLatLng.lng, msg, true);
         closePicker();
     });
 })();
