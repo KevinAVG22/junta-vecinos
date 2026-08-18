@@ -13,6 +13,8 @@ from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
 import io
 import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 import json
 import time
 import ssl
@@ -1650,42 +1652,365 @@ def api_mapa_geocodificar():
     })
 
 
-@app.route('/exportar-excel')
-@login_required
-def exportar_excel():
-    vecinos = Vecino.query.filter_by(activo=True).order_by(Vecino.nombre.asc()).all()
+def _edad_mediana(edades):
+    if not edades:
+        return None
+    ordenadas = sorted(edades)
+    n = len(ordenadas)
+    mid = n // 2
+    if n % 2:
+        return ordenadas[mid]
+    return round((ordenadas[mid - 1] + ordenadas[mid]) / 2, 1)
+
+
+def _stats_demografia_vecinos(vecinos):
+    orden_rangos = ('0-17', '18-29', '30-44', '45-59', '60-74', '75+', 'Sin dato')
+    conteo = {r: 0 for r in orden_rangos}
+    edades = []
+    for vecino in vecinos:
+        rango = vecino.rango_etario
+        conteo[rango] = conteo.get(rango, 0) + 1
+        if vecino.edad is not None:
+            edades.append(vecino.edad)
+    total = len(vecinos) or 1
+    return {
+        'conteo_rangos': [(r, conteo[r], round(conteo[r] / total * 100, 1)) for r in orden_rangos],
+        'menores': conteo['0-17'],
+        'jovenes': conteo['18-29'],
+        'adultos_medios': conteo['30-44'] + conteo['45-59'],
+        'mayores': conteo['60-74'] + conteo['75+'],
+        'sin_dato_edad': conteo['Sin dato'],
+        'con_fecha_nacimiento': sum(1 for v in vecinos if v.fecha_nacimiento),
+        'edad_promedio': round(sum(edades) / len(edades), 1) if edades else None,
+        'edad_mediana': _edad_mediana(edades),
+        'edad_min': min(edades) if edades else None,
+        'edad_max': max(edades) if edades else None,
+    }
+
+
+def _stats_demografia_casa(integrantes):
+    dem = _stats_demografia_vecinos(integrantes)
+    nombres = ', '.join(f'{v.nombre} {v.apellidos}' for v in integrantes)
+    return {
+        **dem,
+        'integrantes': nombres,
+        'menores': dem['menores'],
+        'jovenes': dem['jovenes'],
+        'adultos': dem['adultos_medios'],
+        'mayores': dem['mayores'],
+    }
+
+
+def _estado_ubicacion_vecino(vecino):
+    if not _tiene_ubicacion_mapa(vecino):
+        return 'Sin ubicación'
+    if _coords_dentro_cuadrante(vecino.latitud, vecino.longitud):
+        if vecino.geocodificacion_error:
+            return f'En cuadrante ({vecino.geocodificacion_error})'
+        return 'En cuadrante'
+    return vecino.geocodificacion_error or 'Fuera del cuadrante'
+
+
+def _xl_theme():
+    thin = Side(style='thin', color='D1D5DB')
+    return {
+        'title_font': Font(name='Calibri', bold=True, size=16, color='059669'),
+        'subtitle_font': Font(name='Calibri', bold=True, size=12, color='1F2937'),
+        'meta_font': Font(name='Calibri', size=10, color='6B7280'),
+        'header_font': Font(name='Calibri', bold=True, size=11, color='FFFFFF'),
+        'header_fill': PatternFill('solid', fgColor='059669'),
+        'section_fill': PatternFill('solid', fgColor='ECFDF5'),
+        'section_font': Font(name='Calibri', bold=True, size=11, color='065F46'),
+        'label_font': Font(name='Calibri', size=11, color='374151'),
+        'value_font': Font(name='Calibri', bold=True, size=11, color='111827'),
+        'zebra_fill': PatternFill('solid', fgColor='F9FAFB'),
+        'border': Border(left=thin, right=thin, top=thin, bottom=thin),
+        'center': Alignment(horizontal='center', vertical='center'),
+        'left': Alignment(horizontal='left', vertical='center', wrap_text=True),
+        'right': Alignment(horizontal='right', vertical='center'),
+    }
+
+
+def _xl_autofit_columns(ws, min_width=10, max_width=48):
+    for col_idx in range(1, ws.max_column + 1):
+        col_letter = get_column_letter(col_idx)
+        max_len = 0
+        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx):
+            for cell in row:
+                if cell.value is not None:
+                    max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max(max_len + 2, min_width), max_width)
+
+
+def _xl_style_header_row(ws, row_idx, num_cols, theme):
+    for col in range(1, num_cols + 1):
+        cell = ws.cell(row=row_idx, column=col)
+        cell.font = theme['header_font']
+        cell.fill = theme['header_fill']
+        cell.alignment = theme['center']
+        cell.border = theme['border']
+
+
+def _xl_write_table(ws, start_row, headers, rows, theme, zebra=True):
+    for col, header in enumerate(headers, 1):
+        ws.cell(row=start_row, column=col, value=header)
+    _xl_style_header_row(ws, start_row, len(headers), theme)
+    for i, row_data in enumerate(rows):
+        row_idx = start_row + 1 + i
+        for col, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col, value=value)
+            cell.border = theme['border']
+            cell.alignment = theme['left']
+            if zebra and i % 2 == 1:
+                cell.fill = theme['zebra_fill']
+    ws.freeze_panes = ws.cell(row=start_row + 1, column=1)
+    return start_row + len(rows)
+
+
+def _xl_write_section_title(ws, row, title, num_cols, theme):
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=num_cols)
+    cell = ws.cell(row=row, column=1, value=title)
+    cell.font = theme['section_font']
+    cell.fill = theme['section_fill']
+    cell.alignment = theme['left']
+    for col in range(1, num_cols + 1):
+        ws.cell(row=row, column=col).border = theme['border']
+        if col > 1:
+            ws.cell(row=row, column=col).fill = theme['section_fill']
+    return row + 1
+
+
+def _xl_write_kv_pairs(ws, start_row, pairs, num_cols, theme):
+    row = start_row
+    label_col = 1
+    value_col = 2 if num_cols >= 2 else 1
+    for label, value in pairs:
+        ws.cell(row=row, column=label_col, value=label).font = theme['label_font']
+        val_cell = ws.cell(row=row, column=value_col, value=value)
+        val_cell.font = theme['value_font']
+        val_cell.alignment = theme['left']
+        for col in range(1, num_cols + 1):
+            ws.cell(row=row, column=col).border = theme['border']
+        row += 1
+    return row
+
+
+def _generar_workbook_padron(vecinos, usuario_nombre=''):
+    theme = _xl_theme()
+    ahora = datetime.datetime.now()
+    casas = sorted(_agrupar_vecinos_por_casa(vecinos), key=lambda c: (-c['count'], c['domicilio'].lower()))
+    stats_casas = _stats_casas(casas)
+    demografia = _stats_demografia_vecinos(vecinos)
+    stats_mapa = _stats_mapa(vecinos)
+    total = len(vecinos)
+
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'Vecinos'
-    # Encabezados
-    ws.append([
-        '#', 'Nombre', 'Apellidos', 'RUT', 'Fecha Nacimiento', 'Edad',
-        'Rango Etario', 'Domicilio', 'Teléfono', 'Fecha Registro', 'Notas',
-    ])
-    # Datos
+
+    # --- Hoja Resumen ---
+    ws_res = wb.active
+    ws_res.title = 'Resumen'
+    ws_res.sheet_view.showGridLines = False
+    ws_res.merge_cells('A1:F1')
+    ws_res['A1'] = 'Junta De Vecino Colón Oriente'
+    ws_res['A1'].font = theme['title_font']
+    ws_res.merge_cells('A2:F2')
+    ws_res['A2'] = 'Informe de Padrón Comunitario'
+    ws_res['A2'].font = theme['subtitle_font']
+    ws_res.merge_cells('A3:F3')
+    ws_res['A3'] = (
+        f'Generado: {ahora.strftime("%d/%m/%Y %H:%M")}'
+        + (f'  ·  Usuario: {usuario_nombre}' if usuario_nombre else '')
+        + f'  ·  Sector: {MAP_SECTOR_CONTEXT}'
+    )
+    ws_res['A3'].font = theme['meta_font']
+
+    row = 5
+    row = _xl_write_section_title(ws_res, row, 'Resumen general', 4, theme)
+    pct_edad = round(demografia['con_fecha_nacimiento'] / total * 100, 1) if total else 0
+    row = _xl_write_kv_pairs(ws_res, row, [
+        ('Total de vecinos registrados', total),
+        ('Vecinos con fecha de nacimiento', f"{demografia['con_fecha_nacimiento']} ({pct_edad}%)"),
+        ('Total de casas / domicilios', stats_casas['total_casas']),
+        ('Promedio de personas por casa', stats_casas['promedio_integrantes']),
+        ('Casas con 1 persona', stats_casas['casas_un_integrante']),
+        ('Casas compartidas (2 o más)', stats_casas['casas_multiples']),
+        ('Casa más habitada', f"{stats_casas['casa_mas_habitada']} ({stats_casas['max_integrantes']} personas)"),
+    ], 4, theme)
+    row += 1
+
+    row = _xl_write_section_title(ws_res, row, 'Demografía', 4, theme)
+    row = _xl_write_kv_pairs(ws_res, row, [
+        ('Menores de 18 años (0-17)', demografia['menores']),
+        ('Jóvenes (18-29)', demografia['jovenes']),
+        ('Adultos (30-59)', demografia['adultos_medios']),
+        ('Adultos mayores (60+)', demografia['mayores']),
+        ('Sin fecha de nacimiento', demografia['sin_dato_edad']),
+        ('Edad promedio', f"{demografia['edad_promedio']} años" if demografia['edad_promedio'] is not None else '—'),
+        ('Edad mediana', f"{demografia['edad_mediana']} años" if demografia['edad_mediana'] is not None else '—'),
+        ('Edad mínima / máxima', (
+            f"{demografia['edad_min']} / {demografia['edad_max']} años"
+            if demografia['edad_min'] is not None else '—'
+        )),
+    ], 4, theme)
+    row += 1
+
+    row = _xl_write_section_title(ws_res, row, 'Ubicación en mapa', 4, theme)
+    pct_mapa = round(stats_mapa['vecinos_con_ubicacion'] / total * 100, 1) if total else 0
+    row = _xl_write_kv_pairs(ws_res, row, [
+        ('Vecinos con ubicación', f"{stats_mapa['vecinos_con_ubicacion']} ({pct_mapa}%)"),
+        ('Vecinos dentro del cuadrante', stats_mapa['vecinos_en_cuadrante']),
+        ('Vecinos sin ubicación', stats_mapa['sin_ubicacion']),
+        ('Pines activos en el mapa', stats_mapa['pines_activos']),
+    ], 4, theme)
+    row += 1
+
+    row = _xl_write_section_title(ws_res, row, 'Distribución por rango etario', 4, theme)
+    rangos_rows = [
+        (rango + (' años' if rango != 'Sin dato' else ''), cantidad, f'{pct}%')
+        for rango, cantidad, pct in demografia['conteo_rangos']
+        if cantidad > 0
+    ]
+    _xl_write_table(ws_res, row, ['Rango etario', 'Cantidad', 'Porcentaje'], rangos_rows, theme)
+    ws_res.column_dimensions['A'].width = 28
+    ws_res.column_dimensions['B'].width = 14
+    ws_res.column_dimensions['C'].width = 14
+    ws_res.column_dimensions['D'].width = 14
+
+    # --- Hoja Rangos Etarios ---
+    ws_rangos = wb.create_sheet('Rangos Etarios')
+    rangos_detalle = []
+    acumulado = 0
+    for rango, cantidad, pct in demografia['conteo_rangos']:
+        if cantidad == 0:
+            continue
+        acumulado += cantidad
+        etiqueta = rango + (' años' if rango != 'Sin dato' else '')
+        rangos_detalle.append((etiqueta, cantidad, pct / 100, acumulado, total - acumulado))
+    last = _xl_write_table(
+        ws_rangos, 1,
+        ['Rango etario', 'Vecinos', '% del total', 'Acumulado', 'Restante'],
+        rangos_detalle, theme,
+    )
+    for r in range(2, last + 1):
+        ws_rangos.cell(row=r, column=3).number_format = '0.0%'
+        ws_rangos.cell(row=r, column=3).alignment = theme['center']
+    _xl_autofit_columns(ws_rangos)
+
+    # --- Hoja Personas por Casa ---
+    ws_casas = wb.create_sheet('Personas por Casa')
+    casas_rows = []
+    for idx, casa in enumerate(casas, 1):
+        demo = _stats_demografia_casa(casa['integrantes'])
+        casas_rows.append((
+            idx,
+            casa['domicilio'],
+            casa['calle'],
+            casa['numero'] or '—',
+            casa['count'],
+            casa['tipo'],
+            demo['menores'],
+            demo['jovenes'],
+            demo['adultos'],
+            demo['mayores'],
+            demo['sin_dato_edad'],
+            demo['edad_promedio'] if demo['edad_promedio'] is not None else '—',
+            'Sí' if casa['con_ubicacion'] else 'No',
+            demo['integrantes'],
+        ))
+    last_casas = _xl_write_table(
+        ws_casas, 1,
+        [
+            '#', 'Domicilio', 'Calle', 'Número', 'Integrantes', 'Tipo',
+            'Menores (0-17)', 'Jóvenes (18-29)', 'Adultos (30-59)', 'Mayores (60+)',
+            'Sin dato edad', 'Edad prom.', 'En mapa', 'Integrantes (nombres)',
+        ],
+        casas_rows, theme,
+    )
+    for r in range(2, last_casas + 1):
+        for col in (5, 7, 8, 9, 10, 11):
+            ws_casas.cell(row=r, column=col).alignment = theme['center']
+    _xl_autofit_columns(ws_casas, max_width=55)
+
+    # --- Hoja Vecinos (detalle completo) ---
+    ws_vec = wb.create_sheet('Vecinos')
+    vecinos_rows = []
     for idx, v in enumerate(vecinos, 1):
-        ws.append([
+        vecinos_rows.append((
             idx,
             v.nombre,
             v.apellidos,
             v.rut,
-            v.fecha_nacimiento.strftime('%d/%m/%Y') if v.fecha_nacimiento else '',
+            v.fecha_nacimiento,
             v.edad if v.edad is not None else '',
             v.rango_etario,
             v.domicilio,
             v.telefono or '',
-            v.fecha_registro.strftime('%d/%m/%Y'),
-            v.notas or ''
-        ])
-    # Guardar en memoria
+            v.fecha_registro.strftime('%d/%m/%Y') if v.fecha_registro else '',
+            v.latitud if v.latitud is not None else '',
+            v.longitud if v.longitud is not None else '',
+            _estado_ubicacion_vecino(v),
+            v.geocodificado_en.strftime('%d/%m/%Y %H:%M') if v.geocodificado_en else '',
+            v.notas or '',
+        ))
+    last_vec = _xl_write_table(
+        ws_vec, 1,
+        [
+            '#', 'Nombre', 'Apellidos', 'RUT', 'F. Nacimiento', 'Edad', 'Rango etario',
+            'Domicilio', 'Teléfono', 'F. Registro', 'Latitud', 'Longitud',
+            'Estado ubicación', 'Geocodificado', 'Notas',
+        ],
+        vecinos_rows, theme,
+    )
+    for r in range(2, last_vec + 1):
+        ws_vec.cell(row=r, column=5).number_format = 'DD/MM/YYYY'
+        for col in (6, 11, 12):
+            ws_vec.cell(row=r, column=col).alignment = theme['center']
+    _xl_autofit_columns(ws_vec, max_width=40)
+
+    # --- Hoja Estadísticas por Casa (resumen numérico) ---
+    ws_stats = wb.create_sheet('Estadísticas')
+    casas_con_menores = sum(
+        1 for c in casas if _stats_demografia_casa(c['integrantes'])['menores'] > 0
+    )
+    stats_rows = [
+        ('Total vecinos', total),
+        ('Total casas', stats_casas['total_casas']),
+        ('Promedio integrantes por casa', stats_casas['promedio_integrantes']),
+        ('Máximo integrantes en una casa', stats_casas['max_integrantes']),
+        ('Casas individuales', stats_casas['casas_un_integrante']),
+        ('Casas compartidas', stats_casas['casas_multiples']),
+        ('Total menores (0-17)', demografia['menores']),
+        ('Promedio menores por casa', round(demografia['menores'] / stats_casas['total_casas'], 2) if stats_casas['total_casas'] else 0),
+        ('Casas con al menos 1 menor', casas_con_menores),
+        ('Casas solo adultos (sin menores)', stats_casas['total_casas'] - casas_con_menores),
+        ('Vecinos con ubicación en mapa', stats_mapa['vecinos_con_ubicacion']),
+        ('Vecinos en cuadrante', stats_mapa['vecinos_en_cuadrante']),
+        ('Edad promedio comunidad', demografia['edad_promedio'] if demografia['edad_promedio'] is not None else '—'),
+        ('Edad mediana comunidad', demografia['edad_mediana'] if demografia['edad_mediana'] is not None else '—'),
+    ]
+    ws_stats.merge_cells('A1:B1')
+    ws_stats['A1'] = 'Indicadores calculados'
+    ws_stats['A1'].font = theme['subtitle_font']
+    _xl_write_table(ws_stats, 3, ['Indicador', 'Valor'], stats_rows, theme, zebra=True)
+    _xl_autofit_columns(ws_stats, min_width=14, max_width=45)
+
+    return wb
+
+
+@app.route('/exportar-excel')
+@login_required
+def exportar_excel():
+    vecinos = Vecino.query.filter_by(activo=True).order_by(Vecino.apellidos.asc(), Vecino.nombre.asc()).all()
+    wb = _generar_workbook_padron(vecinos, usuario_nombre=current_user.username)
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
+    nombre_archivo = f"padron_vecinos_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return send_file(
         output,
         as_attachment=True,
-        download_name='vecinos.xlsx',
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        download_name=nombre_archivo,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
 
 
